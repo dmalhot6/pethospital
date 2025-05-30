@@ -106,26 +106,27 @@ jobs:
         working-directory: ./infrastructure
         run: terraform apply -auto-approve tfplan
 
-      - name: Export Terraform Outputs
-        id: terraform-outputs
+      - name: Get Terraform Outputs
         working-directory: ./infrastructure
         run: |
-          # Ensure we're getting clean outputs without debug info
-          TF_LOG='' # Disable Terraform logging
+          # Create a JSON file with all outputs
+          terraform output -json > terraform_outputs.json
           
-          # Use -no-color to avoid ANSI color codes in output
-          CLUSTER_NAME=$(terraform output -no-color -raw cluster_name)
-          ECR_URLS=$(terraform output -no-color -json ecr_repository_urls)
-          APP_URL=$(terraform output -no-color -raw application_url)
+          # Extract values using jq
+          echo "CLUSTER_NAME=$(jq -r '.cluster_name.value' terraform_outputs.json)" >> $GITHUB_ENV
+          echo "ECR_REPOSITORY_URLS=$(jq -c '.ecr_repository_urls.value' terraform_outputs.json)" >> $GITHUB_ENV
+          echo "APPLICATION_URL=$(jq -r '.application_url.value' terraform_outputs.json)" >> $GITHUB_ENV
           
-          # Debug what we're getting
-          echo "Debug - Cluster name: $CLUSTER_NAME"
-          echo "Debug - App URL: $APP_URL"
-          
-          # Set outputs
+          # Debug
+          echo "Cluster name: $(jq -r '.cluster_name.value' terraform_outputs.json)"
+          echo "Application URL: $(jq -r '.application_url.value' terraform_outputs.json)"
+      
+      - name: Set Job Outputs
+        id: terraform-outputs
+        run: |
           echo "cluster_name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
-          echo "ecr_repository_urls=$ECR_URLS" >> $GITHUB_OUTPUT
-          echo "application_url=$APP_URL" >> $GITHUB_OUTPUT
+          echo "ecr_repository_urls=$ECR_REPOSITORY_URLS" >> $GITHUB_OUTPUT
+          echo "application_url=$APPLICATION_URL" >> $GITHUB_OUTPUT
 
   build_and_push:
     name: Build and Push Docker Images
