@@ -194,13 +194,17 @@ module "monitoring" {
 module "argocd" {
   source = "./modules/argocd"
 
-  cluster_name = local.cluster_name
-  environment  = var.environment
+  cluster_name     = local.cluster_name
+  environment      = var.environment
+  cluster_endpoint = module.eks.cluster_endpoint
   
   tags = {
     Environment = var.environment
     Project     = "pethospital"
   }
+
+  # Add explicit dependency on EKS module
+  depends_on = [module.eks]
 }
 
 # Output the cluster endpoint and other important information

@@ -1,6 +1,14 @@
 resource "null_resource" "install_argocd" {
+  # Add explicit dependency on the EKS cluster
+  triggers = {
+    cluster_endpoint = var.cluster_endpoint
+  }
+
   provisioner "local-exec" {
     command = <<-EOT
+      # Sleep to ensure EKS cluster is fully ready
+      sleep 30
+      
       # Update kubeconfig to connect to the EKS cluster
       aws eks update-kubeconfig --name ${var.cluster_name} --region ${data.aws_region.current.name}
       

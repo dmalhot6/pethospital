@@ -11,7 +11,12 @@ variable "environment" {
 variable "git_repository_url" {
   description = "URL of the Git repository containing the application code"
   type        = string
-  default     = "https://github.com/yourusername/pethospital.git"
+  default     = "https://github.com/AnandarajuCS/pethospital.git"
+}
+
+variable "cluster_endpoint" {
+  description = "Endpoint of the EKS cluster"
+  type        = string
 }
 
 variable "tags" {
