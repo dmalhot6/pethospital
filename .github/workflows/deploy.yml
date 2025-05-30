@@ -258,13 +258,14 @@ jobs:
 
       - name: Create namespace
         run: |
-          # Create the namespace if it doesn't exist
-          NAMESPACE="${{ env.PROJECT_PREFIX }}-${{ needs.setup_state_storage.outputs.environment }}"
-          echo "Creating namespace: $NAMESPACE"
-          kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+          # Create both namespaces to ensure compatibility
+          echo "Creating namespace: pet-hospital-dev"
+          kubectl create namespace pet-hospital-dev --dry-run=client -o yaml | kubectl apply -f -
+          kubectl label namespace pet-hospital-dev --overwrite argocd.argoproj.io/managed-by=argocd
           
-          # Add a label to the namespace for ArgoCD
-          kubectl label namespace $NAMESPACE --overwrite argocd.argoproj.io/managed-by=argocd
+          echo "Creating namespace: pethospital-dev"
+          kubectl create namespace pethospital-dev --dry-run=client -o yaml | kubectl apply -f -
+          kubectl label namespace pethospital-dev --overwrite argocd.argoproj.io/managed-by=argocd
 
       - name: Deploy with ArgoCD
         run: |
@@ -281,7 +282,8 @@ jobs:
           argocd login localhost:8080 --username admin --password $ARGOCD_PASSWORD --insecure
           
           # Create/update ArgoCD application
-          NAMESPACE="${{ env.PROJECT_PREFIX }}-${{ needs.setup_state_storage.outputs.environment }}"
+          # Use pethospital-dev namespace to match what's in the k8s manifests
+          NAMESPACE="pethospital-dev"
           echo "Using namespace: $NAMESPACE"
           
           argocd app create pethospital \
