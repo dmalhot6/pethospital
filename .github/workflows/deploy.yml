@@ -110,9 +110,22 @@ jobs:
         id: terraform-outputs
         working-directory: ./infrastructure
         run: |
-          echo "cluster_name=$(terraform output -raw cluster_name)" >> $GITHUB_OUTPUT
-          echo "ecr_repository_urls=$(terraform output -json ecr_repository_urls)" >> $GITHUB_OUTPUT
-          echo "application_url=$(terraform output -raw application_url)" >> $GITHUB_OUTPUT
+          # Ensure we're getting clean outputs without debug info
+          TF_LOG='' # Disable Terraform logging
+          
+          # Use -no-color to avoid ANSI color codes in output
+          CLUSTER_NAME=$(terraform output -no-color -raw cluster_name)
+          ECR_URLS=$(terraform output -no-color -json ecr_repository_urls)
+          APP_URL=$(terraform output -no-color -raw application_url)
+          
+          # Debug what we're getting
+          echo "Debug - Cluster name: $CLUSTER_NAME"
+          echo "Debug - App URL: $APP_URL"
+          
+          # Set outputs
+          echo "cluster_name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
+          echo "ecr_repository_urls=$ECR_URLS" >> $GITHUB_OUTPUT
+          echo "application_url=$APP_URL" >> $GITHUB_OUTPUT
 
   build_and_push:
     name: Build and Push Docker Images
