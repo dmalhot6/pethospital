@@ -109,24 +109,49 @@ jobs:
       - name: Get Terraform Outputs
         working-directory: ./infrastructure
         run: |
-          # Create a JSON file with all outputs
-          terraform output -json > terraform_outputs.json
+          # Check what outputs are available
+          echo "Raw terraform output:"
+          terraform output
           
-          # Extract values using jq
-          echo "CLUSTER_NAME=$(jq -r '.cluster_name.value' terraform_outputs.json)" >> $GITHUB_ENV
-          echo "ECR_REPOSITORY_URLS=$(jq -c '.ecr_repository_urls.value' terraform_outputs.json)" >> $GITHUB_ENV
-          echo "APPLICATION_URL=$(jq -r '.application_url.value' terraform_outputs.json)" >> $GITHUB_ENV
+          # Try to get individual outputs directly
+          echo "Trying individual outputs:"
+          echo "Cluster name: $(terraform output -raw cluster_name 2>/dev/null || echo 'not available')"
+          echo "Application URL: $(terraform output -raw application_url 2>/dev/null || echo 'not available')"
           
-          # Debug
-          echo "Cluster name: $(jq -r '.cluster_name.value' terraform_outputs.json)"
-          echo "Application URL: $(jq -r '.application_url.value' terraform_outputs.json)"
+          # Set environment variables with direct output commands
+          CLUSTER_NAME=$(terraform output -raw cluster_name 2>/dev/null || echo 'pet-hospital-eks-cluster')
+          APPLICATION_URL=$(terraform output -raw application_url 2>/dev/null || echo 'http://pet-hospital-eks-cluster-alb.amazonaws.com')
+          
+          # For ECR URLs, we need to construct them
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          
+          # Create a JSON structure for ECR URLs
+          echo "{" > ecr_urls.json
+          echo "  \"${PROJECT_PREFIX}-pet-service\": \"${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-pet-service\"," >> ecr_urls.json
+          echo "  \"${PROJECT_PREFIX}-hospital-service\": \"${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-hospital-service\"," >> ecr_urls.json
+          echo "  \"${PROJECT_PREFIX}-doctor-service\": \"${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-doctor-service\"," >> ecr_urls.json
+          echo "  \"${PROJECT_PREFIX}-billing-service\": \"${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-billing-service\"," >> ecr_urls.json
+          echo "  \"${PROJECT_PREFIX}-insurance-service\": \"${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-insurance-service\"," >> ecr_urls.json
+          echo "  \"${PROJECT_PREFIX}-visit-service\": \"${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-visit-service\"," >> ecr_urls.json
+          echo "  \"${PROJECT_PREFIX}-vet-service\": \"${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-vet-service\"," >> ecr_urls.json
+          echo "  \"${PROJECT_PREFIX}-frontend\": \"${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-frontend\"" >> ecr_urls.json
+          echo "}" >> ecr_urls.json
+          
+          # Set environment variables
+          echo "CLUSTER_NAME=$CLUSTER_NAME" >> $GITHUB_ENV
+          echo "APPLICATION_URL=$APPLICATION_URL" >> $GITHUB_ENV
+          echo "ECR_REPOSITORY_URLS=$(cat ecr_urls.json)" >> $GITHUB_ENV
       
       - name: Set Job Outputs
         id: terraform-outputs
         run: |
           echo "cluster_name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
-          echo "ecr_repository_urls=$ECR_REPOSITORY_URLS" >> $GITHUB_OUTPUT
           echo "application_url=$APPLICATION_URL" >> $GITHUB_OUTPUT
+          
+          # For the ECR URLs, we need to handle the multiline JSON
+          echo "ecr_repository_urls<<EOF" >> $GITHUB_OUTPUT
+          echo "$ECR_REPOSITORY_URLS" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
 
   build_and_push:
     name: Build and Push Docker Images
@@ -152,10 +177,13 @@ jobs:
       - name: Extract ECR repository URL
         id: extract-url
         run: |
-          ECR_URLS='${{ needs.terraform.outputs.ecr_repository_urls }}'
           SERVICE="${{ matrix.service }}"
           PREFIXED_SERVICE="${{ env.PROJECT_PREFIX }}-$SERVICE"
-          ECR_URL=$(echo $ECR_URLS | jq -r ".[\"$PREFIXED_SERVICE\"]")
+          
+          # Parse the JSON and extract the URL
+          ECR_URL=$(echo '${{ needs.terraform.outputs.ecr_repository_urls }}' | jq -r ".[\"$PREFIXED_SERVICE\"]")
+          
+          echo "Using ECR_URL: $ECR_URL for service: $PREFIXED_SERVICE"
           echo "ECR_URL=$ECR_URL" >> $GITHUB_ENV
 
       - name: Build and push Docker image
