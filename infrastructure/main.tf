@@ -2,23 +2,19 @@ provider "aws" {
   region = var.region
 }
 
-# Create a random string for unique naming
-resource "random_string" "suffix" {
-  length  = 8
-  special = false
-  upper   = false
-}
-
+# Use variables for consistent naming and configuration
 locals {
-  cluster_name = "pethospital-eks-${random_string.suffix.result}"
-  suffix       = random_string.suffix.result
+  prefix       = var.project_prefix
+  cluster_name = "${var.project_prefix}-eks-cluster"
+  environment  = var.environment
+  region       = var.region
 }
 
 # VPC Module
 module "vpc" {
   source = "./modules/vpc"
 
-  name                 = "pethospital-vpc"
+  name                 = "${local.prefix}-vpc"
   cidr                 = var.vpc_cidr
   azs                  = var.availability_zones
   private_subnets      = var.private_subnets
@@ -29,8 +25,8 @@ module "vpc" {
 
   tags = {
     "kubernetes.io/cluster/${local.cluster_name}" = "shared"
-    Environment                                   = var.environment
-    Project                                       = "pethospital"
+    Environment                                   = local.environment
+    Project                                       = local.prefix
   }
 
   public_subnet_tags = {
@@ -52,6 +48,7 @@ module "eks" {
   cluster_version = var.kubernetes_version
   vpc_id          = module.vpc.vpc_id
   subnet_ids      = module.vpc.private_subnets
+  region          = local.region
 
   node_groups = {
     main = {
@@ -64,8 +61,8 @@ module "eks" {
   }
 
   tags = {
-    Environment = var.environment
-    Project     = "pethospital"
+    Environment = local.environment
+    Project     = local.prefix
   }
 }
 
@@ -75,7 +72,7 @@ module "dynamodb" {
 
   tables = [
     {
-      name         = "Pets"
+      name         = "${local.prefix}-pets"
       billing_mode = "PAY_PER_REQUEST"
       hash_key     = "id"
       attributes = [
@@ -86,7 +83,7 @@ module "dynamodb" {
       ]
     },
     {
-      name         = "Hospitals"
+      name         = "${local.prefix}-hospitals"
       billing_mode = "PAY_PER_REQUEST"
       hash_key     = "id"
       attributes = [
@@ -97,7 +94,7 @@ module "dynamodb" {
       ]
     },
     {
-      name         = "Doctors"
+      name         = "${local.prefix}-doctors"
       billing_mode = "PAY_PER_REQUEST"
       hash_key     = "id"
       attributes = [
@@ -108,7 +105,7 @@ module "dynamodb" {
       ]
     },
     {
-      name         = "Visits"
+      name         = "${local.prefix}-visits"
       billing_mode = "PAY_PER_REQUEST"
       hash_key     = "id"
       attributes = [
@@ -119,7 +116,7 @@ module "dynamodb" {
       ]
     },
     {
-      name         = "Billing"
+      name         = "${local.prefix}-billing"
       billing_mode = "PAY_PER_REQUEST"
       hash_key     = "id"
       attributes = [
@@ -130,7 +127,7 @@ module "dynamodb" {
       ]
     },
     {
-      name         = "Insurance"
+      name         = "${local.prefix}-insurance"
       billing_mode = "PAY_PER_REQUEST"
       hash_key     = "id"
       attributes = [
@@ -143,8 +140,8 @@ module "dynamodb" {
   ]
 
   tags = {
-    Environment = var.environment
-    Project     = "pethospital"
+    Environment = local.environment
+    Project     = local.prefix
   }
 }
 
@@ -153,19 +150,19 @@ module "ecr" {
   source = "./modules/ecr"
 
   repositories = [
-    "pet-service",
-    "hospital-service",
-    "doctor-service",
-    "billing-service",
-    "insurance-service",
-    "visit-service",
-    "vet-service",
-    "frontend"
+    "${local.prefix}-pet-service",
+    "${local.prefix}-hospital-service",
+    "${local.prefix}-doctor-service",
+    "${local.prefix}-billing-service",
+    "${local.prefix}-insurance-service",
+    "${local.prefix}-visit-service",
+    "${local.prefix}-vet-service",
+    "${local.prefix}-frontend"
   ]
 
   tags = {
-    Environment = var.environment
-    Project     = "pethospital"
+    Environment = local.environment
+    Project     = local.prefix
   }
 }
 
@@ -174,7 +171,8 @@ module "monitoring" {
   source = "./modules/monitoring"
 
   cluster_name = local.cluster_name
-  environment  = var.environment
+  environment  = local.environment
+  prefix       = local.prefix
   
   api_latency_threshold     = var.api_latency_threshold
   error_rate_threshold      = var.error_rate_threshold
@@ -185,8 +183,8 @@ module "monitoring" {
   ok_actions    = var.ok_actions
 
   tags = {
-    Environment = var.environment
-    Project     = "pethospital"
+    Environment = local.environment
+    Project     = local.prefix
   }
 }
 
@@ -195,12 +193,13 @@ module "argocd" {
   source = "./modules/argocd"
 
   cluster_name     = local.cluster_name
-  environment      = var.environment
+  environment      = local.environment
   cluster_endpoint = module.eks.cluster_endpoint
+  prefix           = local.prefix
   
   tags = {
-    Environment = var.environment
-    Project     = "pethospital"
+    Environment = local.environment
+    Project     = local.prefix
   }
 
   # Add explicit dependency on EKS module

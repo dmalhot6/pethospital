@@ -1,0 +1,76 @@
+name: Setup Infrastructure Prerequisites
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: 'AWS Region'
+        required: true
+        default: 'us-west-2'
+      prefix:
+        description: 'Resource prefix'
+        required: true
+        default: 'pet-hospital'
+
+env:
+  TERRAFORM_VERSION: 1.5.7
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  setup:
+    name: Setup Infrastructure Prerequisites
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ github.event.inputs.region }}
+
+      - name: Setup Terraform State Storage
+        run: |
+          chmod +x ./infrastructure/setup-state-storage.sh
+          ./infrastructure/setup-state-storage.sh --prefix ${{ github.event.inputs.prefix }} --region ${{ github.event.inputs.region }}
+
+      - name: Update backend.tf if needed
+        run: |
+          if [ "${{ github.event.inputs.region }}" != "us-west-2" ] || [ "${{ github.event.inputs.prefix }}" != "pet-hospital" ]; then
+            cat > ./infrastructure/backend.tf << EOF
+          terraform {
+            backend "s3" {
+              bucket         = "${{ github.event.inputs.prefix }}-terraform-state"
+              key            = "terraform.tfstate"
+              region         = "${{ github.event.inputs.region }}"
+              dynamodb_table = "${{ github.event.inputs.prefix }}-terraform-locks"
+              encrypt        = true
+            }
+          }
+          EOF
+            echo "Updated backend.tf with custom values"
+          else
+            echo "Using default values in backend.tf"
+          fi
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Init
+        working-directory: ./infrastructure
+        run: terraform init
+
+      - name: Verify Setup
+        run: |
+          echo "Terraform state storage has been set up successfully."
+          echo "S3 Bucket: ${{ github.event.inputs.prefix }}-terraform-state"
+          echo "DynamoDB Table: ${{ github.event.inputs.prefix }}-terraform-locks"
+          echo "Region: ${{ github.event.inputs.region }}"
+          echo ""
+          echo "You can now run the Deploy workflow to deploy your infrastructure."

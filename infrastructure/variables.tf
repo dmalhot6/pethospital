@@ -1,24 +1,30 @@
 variable "region" {
-  description = "AWS region"
+  description = "AWS region to deploy resources"
   type        = string
   default     = "us-west-2"
 }
 
 variable "environment" {
-  description = "Environment name"
+  description = "Environment name (dev, staging, prod)"
   type        = string
   default     = "dev"
 }
 
-# VPC Variables
+variable "project_prefix" {
+  description = "Prefix for all resources created by this project"
+  type        = string
+  default     = "pet-hospital"
+}
+
+# VPC Configuration
 variable "vpc_cidr" {
-  description = "CIDR block for VPC"
+  description = "CIDR block for the VPC"
   type        = string
   default     = "10.0.0.0/16"
 }
 
 variable "availability_zones" {
-  description = "List of availability zones"
+  description = "List of availability zones to use"
   type        = list(string)
   default     = ["us-west-2a", "us-west-2b", "us-west-2c"]
 }
@@ -35,11 +41,11 @@ variable "public_subnets" {
   default     = ["10.0.101.0/24", "10.0.102.0/24", "10.0.103.0/24"]
 }
 
-# EKS Variables
+# EKS Configuration
 variable "kubernetes_version" {
-  description = "Kubernetes version"
+  description = "Kubernetes version for the EKS cluster"
   type        = string
-  default     = "1.28"
+  default     = "1.27"
 }
 
 variable "eks_desired_capacity" {
@@ -57,44 +63,44 @@ variable "eks_max_capacity" {
 variable "eks_min_capacity" {
   description = "Minimum number of worker nodes"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "eks_instance_types" {
-  description = "List of instance types for the EKS nodes"
+  description = "List of instance types for the EKS worker nodes"
   type        = list(string)
   default     = ["t3.medium"]
 }
 
 variable "eks_disk_size" {
-  description = "Disk size in GB for worker nodes"
+  description = "Disk size for EKS worker nodes in GB"
   type        = number
   default     = 50
 }
 
-# Monitoring Variables
+# Monitoring Configuration
 variable "api_latency_threshold" {
   description = "Threshold for API latency alarm in milliseconds"
   type        = number
-  default     = 1000 # 1 second
+  default     = 1000
 }
 
 variable "error_rate_threshold" {
   description = "Threshold for error rate alarm in percentage"
   type        = number
-  default     = 5 # 5%
+  default     = 5
 }
 
 variable "cpu_utilization_threshold" {
   description = "Threshold for CPU utilization alarm in percentage"
   type        = number
-  default     = 80 # 80%
+  default     = 80
 }
 
 variable "memory_utilization_threshold" {
   description = "Threshold for memory utilization alarm in percentage"
   type        = number
-  default     = 80 # 80%
+  default     = 80
 }
 
 variable "alarm_actions" {
@@ -107,4 +113,11 @@ variable "ok_actions" {
   description = "List of ARNs to notify when alarm transitions to OK state"
   type        = list(string)
   default     = []
+}
+
+# Git Repository Configuration
+variable "git_repository_url" {
+  description = "URL of the Git repository containing the application code"
+  type        = string
+  default     = "https://github.com/AnandarajuCS/pethospital.git"
 }

@@ -4,7 +4,7 @@ variable "cluster_name" {
 }
 
 variable "cluster_version" {
-  description = "Kubernetes version to use for the EKS cluster"
+  description = "Kubernetes version for the EKS cluster"
   type        = string
 }
 
@@ -14,29 +14,22 @@ variable "vpc_id" {
 }
 
 variable "subnet_ids" {
-  description = "A list of subnet IDs where the EKS cluster will be deployed"
+  description = "List of subnet IDs for the EKS cluster"
   type        = list(string)
 }
 
 variable "node_groups" {
   description = "Map of EKS node group configurations"
-  type        = map(object({
-    desired_capacity = number
-    max_capacity     = number
-    min_capacity     = number
-    instance_types   = list(string)
-    disk_size        = number
-  }))
+  type        = map(any)
+}
+
+variable "region" {
+  description = "AWS region to deploy resources"
+  type        = string
 }
 
 variable "tags" {
   description = "A map of tags to add to all resources"
   type        = map(string)
   default     = {}
-}
-
-variable "region" {
-  description = "AWS region"
-  type        = string
-  default     = "us-west-2"
 }

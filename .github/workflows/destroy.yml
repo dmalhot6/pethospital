@@ -6,10 +6,19 @@ on:
       confirm:
         description: 'Type "destroy" to confirm infrastructure destruction'
         required: true
+      environment:
+        description: 'Environment to destroy (dev or prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
 
 env:
   AWS_REGION: us-west-2
   TERRAFORM_VERSION: 1.5.7
+  PROJECT_PREFIX: pet-hospital
 
 permissions:
   id-token: write
@@ -45,13 +54,50 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
       - name: Terraform Init
         working-directory: ./infrastructure
         run: terraform init
 
       - name: Terraform Destroy
         working-directory: ./infrastructure
-        run: terraform destroy -auto-approve
+        run: |
+          if [ "${{ github.event.inputs.environment }}" == "prod" ]; then
+            terraform destroy -var-file=environments/prod.tfvars -auto-approve
+          else
+            terraform destroy -var-file=environments/terraform.tfvars -auto-approve
+          fi
 
       - name: Notify Destruction Complete
         run: echo "Infrastructure destruction completed successfully!"
+        
+  cleanup_state:
+    name: Clean Up Terraform State (Optional)
+    needs: destroy
+    runs-on: ubuntu-latest
+    if: ${{ github.event.inputs.confirm == 'destroy-all' }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+          
+      - name: Delete S3 bucket and DynamoDB table
+        run: |
+          echo "Cleaning up Terraform state storage..."
+          
+          # Empty S3 bucket first
+          aws s3 rm s3://${{ env.PROJECT_PREFIX }}-terraform-state --recursive
+          
+          # Delete S3 bucket
+          aws s3api delete-bucket --bucket ${{ env.PROJECT_PREFIX }}-terraform-state --region ${{ env.AWS_REGION }}
+          
+          # Delete DynamoDB table
+          aws dynamodb delete-table --table-name ${{ env.PROJECT_PREFIX }}-terraform-locks --region ${{ env.AWS_REGION }}
+          
+          echo "Terraform state storage cleanup completed."

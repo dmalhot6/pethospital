@@ -8,28 +8,34 @@ variable "environment" {
   type        = string
 }
 
+variable "prefix" {
+  description = "Resource prefix for naming"
+  type        = string
+  default     = "pet-hospital"
+}
+
 variable "api_latency_threshold" {
   description = "Threshold for API latency alarm in milliseconds"
   type        = number
-  default     = 1000 # 1 second
+  default     = 1000
 }
 
 variable "error_rate_threshold" {
   description = "Threshold for error rate alarm in percentage"
   type        = number
-  default     = 5 # 5%
+  default     = 5
 }
 
 variable "cpu_utilization_threshold" {
   description = "Threshold for CPU utilization alarm in percentage"
   type        = number
-  default     = 80 # 80%
+  default     = 80
 }
 
 variable "memory_utilization_threshold" {
   description = "Threshold for memory utilization alarm in percentage"
   type        = number
-  default     = 80 # 80%
+  default     = 80
 }
 
 variable "alarm_actions" {

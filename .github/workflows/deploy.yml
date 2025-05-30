@@ -1,24 +1,69 @@
 name: Deploy Infrastructure and Application
 
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy (dev or prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
 
 env:
   AWS_REGION: us-west-2
   TERRAFORM_VERSION: 1.5.7
-  ENVIRONMENT: dev
+  PROJECT_PREFIX: pet-hospital
 
 permissions:
   id-token: write
   contents: read
 
 jobs:
+  setup_state_storage:
+    name: Setup Terraform State Storage
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set environment
+        id: set-env
+        run: |
+          if [ "${{ github.event.inputs.environment }}" != "" ]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Terraform State Storage
+        run: |
+          # Check if S3 bucket already exists
+          if aws s3api head-bucket --bucket ${{ env.PROJECT_PREFIX }}-terraform-state 2>/dev/null; then
+            echo "Terraform state storage already exists. Skipping creation."
+          else
+            echo "Creating Terraform state storage..."
+            ./infrastructure/setup-state-storage.sh --prefix ${{ env.PROJECT_PREFIX }} --region ${{ env.AWS_REGION }}
+          fi
+
   terraform:
     name: Terraform
+    needs: setup_state_storage
     runs-on: ubuntu-latest
+    outputs:
+      cluster_name: ${{ steps.terraform-outputs.outputs.cluster_name }}
+      ecr_repository_urls: ${{ steps.terraform-outputs.outputs.ecr_repository_urls }}
+      application_url: ${{ steps.terraform-outputs.outputs.application_url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -34,24 +79,40 @@ jobs:
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'latest'
+
       - name: Terraform Init
         working-directory: ./infrastructure
         run: terraform init
 
       - name: Terraform Plan
         working-directory: ./infrastructure
-        run: terraform plan -var="environment=${{ env.ENVIRONMENT }}" -out=tfplan
+        run: |
+          if [ "${{ needs.setup_state_storage.outputs.environment }}" == "prod" ]; then
+            terraform plan -var-file=environments/prod.tfvars -out=tfplan
+          else
+            terraform plan -var-file=environments/terraform.tfvars -out=tfplan
+          fi
 
       - name: Terraform Apply
         working-directory: ./infrastructure
         run: terraform apply -auto-approve tfplan
 
       - name: Export Terraform Outputs
+        id: terraform-outputs
         working-directory: ./infrastructure
         run: |
-          echo "CLUSTER_NAME=$(terraform output -raw cluster_name)" >> $GITHUB_ENV
-          echo "ECR_REPOSITORY_URLS=$(terraform output -json ecr_repository_urls)" >> $GITHUB_ENV
-          echo "APPLICATION_URL=$(terraform output -raw application_url)" >> $GITHUB_ENV
+          echo "cluster_name=$(terraform output -raw cluster_name)" >> $GITHUB_OUTPUT
+          echo "ecr_repository_urls=$(terraform output -json ecr_repository_urls)" >> $GITHUB_OUTPUT
+          echo "application_url=$(terraform output -raw application_url)" >> $GITHUB_OUTPUT
 
   build_and_push:
     name: Build and Push Docker Images
@@ -77,9 +138,10 @@ jobs:
       - name: Extract ECR repository URL
         id: extract-url
         run: |
-          ECR_URLS=${{ needs.terraform.outputs.ECR_REPOSITORY_URLS }}
-          SERVICE=${{ matrix.service }}
-          ECR_URL=$(echo $ECR_URLS | jq -r ".\"$SERVICE\"")
+          ECR_URLS='${{ needs.terraform.outputs.ecr_repository_urls }}'
+          SERVICE="${{ matrix.service }}"
+          PREFIXED_SERVICE="${{ env.PROJECT_PREFIX }}-$SERVICE"
+          ECR_URL=$(echo $ECR_URLS | jq -r ".[\"$PREFIXED_SERVICE\"]")
           echo "ECR_URL=$ECR_URL" >> $GITHUB_ENV
 
       - name: Build and push Docker image
@@ -93,7 +155,7 @@ jobs:
 
   deploy_to_eks:
     name: Deploy to EKS
-    needs: [terraform, build_and_push]
+    needs: [setup_state_storage, terraform, build_and_push]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -106,13 +168,18 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Update kubeconfig
-        run: aws eks update-kubeconfig --name ${{ needs.terraform.outputs.CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+        run: aws eks update-kubeconfig --name ${{ needs.terraform.outputs.cluster_name }} --region ${{ env.AWS_REGION }}
 
       - name: Install ArgoCD CLI
         run: |
           curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
           sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
           rm argocd-linux-amd64
+
+      - name: Wait for ArgoCD to be ready
+        run: |
+          echo "Waiting for ArgoCD server to be ready..."
+          kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
 
       - name: Deploy with ArgoCD
         run: |
@@ -129,9 +196,9 @@ jobs:
           # Create/update ArgoCD application
           argocd app create pethospital \
             --repo https://github.com/${{ github.repository }}.git \
-            --path k8s/overlays/${{ env.ENVIRONMENT }} \
+            --path k8s/overlays/${{ needs.setup_state_storage.outputs.environment }} \
             --dest-server https://kubernetes.default.svc \
-            --dest-namespace pethospital-${{ env.ENVIRONMENT }} \
+            --dest-namespace ${{ env.PROJECT_PREFIX }}-${{ needs.setup_state_storage.outputs.environment }} \
             --sync-policy automated \
             --auto-prune \
             --self-heal \
@@ -142,15 +209,15 @@ jobs:
 
       - name: Output Application URL
         run: |
-          echo "Application URL: ${{ needs.terraform.outputs.APPLICATION_URL }}"
-          echo "APPLICATION_URL=${{ needs.terraform.outputs.APPLICATION_URL }}" >> $GITHUB_ENV
+          echo "Application URL: ${{ needs.terraform.outputs.application_url }}"
+          echo "APPLICATION_URL=${{ needs.terraform.outputs.application_url }}" >> $GITHUB_ENV
 
   notify:
     name: Notify Deployment Status
-    needs: [deploy_to_eks]
+    needs: [deploy_to_eks, terraform]
     runs-on: ubuntu-latest
     steps:
       - name: Deployment Success
         run: |
           echo "Deployment completed successfully!"
-          echo "Application URL: ${{ env.APPLICATION_URL }}"
+          echo "Application URL: ${{ needs.terraform.outputs.application_url }}"

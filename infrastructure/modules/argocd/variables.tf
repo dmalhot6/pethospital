@@ -8,6 +8,12 @@ variable "environment" {
   type        = string
 }
 
+variable "prefix" {
+  description = "Resource prefix for naming"
+  type        = string
+  default     = "pet-hospital"
+}
+
 variable "git_repository_url" {
   description = "URL of the Git repository containing the application code"
   type        = string
