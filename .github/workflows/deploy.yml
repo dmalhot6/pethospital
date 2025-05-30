@@ -256,6 +256,16 @@ jobs:
           echo "Waiting for ArgoCD server to be ready..."
           kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
 
+      - name: Create namespace
+        run: |
+          # Create the namespace if it doesn't exist
+          NAMESPACE="${{ env.PROJECT_PREFIX }}-${{ needs.setup_state_storage.outputs.environment }}"
+          echo "Creating namespace: $NAMESPACE"
+          kubectl create namespace $NAMESPACE --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Add a label to the namespace for ArgoCD
+          kubectl label namespace $NAMESPACE --overwrite argocd.argoproj.io/managed-by=argocd
+
       - name: Deploy with ArgoCD
         run: |
           # Get ArgoCD admin password
@@ -271,11 +281,14 @@ jobs:
           argocd login localhost:8080 --username admin --password $ARGOCD_PASSWORD --insecure
           
           # Create/update ArgoCD application
+          NAMESPACE="${{ env.PROJECT_PREFIX }}-${{ needs.setup_state_storage.outputs.environment }}"
+          echo "Using namespace: $NAMESPACE"
+          
           argocd app create pethospital \
             --repo https://github.com/${{ github.repository }}.git \
             --path k8s/overlays/${{ needs.setup_state_storage.outputs.environment }} \
             --dest-server https://kubernetes.default.svc \
-            --dest-namespace ${{ env.PROJECT_PREFIX }}-${{ needs.setup_state_storage.outputs.environment }} \
+            --dest-namespace $NAMESPACE \
             --sync-policy automated \
             --auto-prune \
             --self-heal \
@@ -298,6 +311,11 @@ jobs:
           fi
           
           # Wait for sync to complete
+          echo "Waiting for sync to complete..."
+          argocd app wait pethospital --timeout 300 || echo "Wait timed out, but continuing as app may still be syncing"
+          
+          # Kill the port-forwarding process
+          kill $PF_PID || true
           echo "Waiting for sync to complete..."
           argocd app wait pethospital --timeout 300 || echo "Wait timed out, but continuing as app may still be syncing"
           
