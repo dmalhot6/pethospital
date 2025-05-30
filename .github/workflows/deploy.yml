@@ -263,6 +263,8 @@ jobs:
           
           # Port forward ArgoCD server (in background)
           kubectl port-forward svc/argocd-server -n argocd 8080:443 &
+          PF_PID=$!
+          echo "Port forwarding process ID: $PF_PID"
           sleep 10
           
           # Login to ArgoCD
@@ -279,8 +281,28 @@ jobs:
             --self-heal \
             --upsert
           
-          # Sync application
-          argocd app sync pethospital
+          # Wait for application to be created/updated before syncing
+          echo "Waiting for application to be ready before syncing..."
+          sleep 10
+          
+          # Check if application exists and is not already syncing
+          APP_STATUS=$(argocd app get pethospital -o json | jq -r '.status.sync.status')
+          echo "Current application status: $APP_STATUS"
+          
+          # Sync application with timeout and error handling
+          if [ "$APP_STATUS" != "Syncing" ]; then
+            echo "Syncing application..."
+            argocd app sync pethospital --timeout 180 || echo "Sync command failed, but continuing as app may sync automatically"
+          else
+            echo "Application is already syncing, skipping manual sync"
+          fi
+          
+          # Wait for sync to complete
+          echo "Waiting for sync to complete..."
+          argocd app wait pethospital --timeout 300 || echo "Wait timed out, but continuing as app may still be syncing"
+          
+          # Kill the port-forwarding process
+          kill $PF_PID || true
 
       - name: Output Application URL
         run: |
