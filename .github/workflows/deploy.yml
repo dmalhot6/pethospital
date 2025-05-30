@@ -207,7 +207,7 @@ jobs:
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
-          context: ./backend/${{ matrix.service }}
+          context: ${{ matrix.service == 'frontend' && './frontend' || format('./backend/{0}', matrix.service) }}
           push: true
           tags: ${{ steps.construct-ecr-url.outputs.ecr_url }}:latest,${{ steps.construct-ecr-url.outputs.ecr_url }}:${{ github.sha }}
           build-args: |
