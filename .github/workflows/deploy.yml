@@ -204,7 +204,22 @@ jobs:
           echo "ECR URL: $ECR_URL"
           echo "ecr_url=$ECR_URL" >> $GITHUB_OUTPUT
 
+      - name: Check if service directory exists
+        id: check-dir
+        run: |
+          SERVICE="${{ matrix.service }}"
+          DIR_PATH="${{ matrix.service == 'frontend' && './frontend' || format('./backend/{0}', matrix.service) }}"
+          
+          if [ -d "$DIR_PATH" ]; then
+            echo "Directory $DIR_PATH exists"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Directory $DIR_PATH does not exist, skipping"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Build and push Docker image
+        if: steps.check-dir.outputs.exists == 'true'
         uses: docker/build-push-action@v4
         with:
           context: ${{ matrix.service == 'frontend' && './frontend' || format('./backend/{0}', matrix.service) }}
