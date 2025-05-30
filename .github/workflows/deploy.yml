@@ -147,6 +147,7 @@ jobs:
         id: get-aws-account
         run: |
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "AWS Account ID: $AWS_ACCOUNT_ID"
           echo "aws_account_id=$AWS_ACCOUNT_ID" >> $GITHUB_OUTPUT
 
       - name: Set Job Outputs
@@ -181,6 +182,23 @@ jobs:
         run: |
           SERVICE="${{ matrix.service }}"
           AWS_ACCOUNT_ID="${{ needs.terraform.outputs.aws_account_id }}"
+          
+          echo "Service: $SERVICE"
+          echo "AWS Account ID from output: $AWS_ACCOUNT_ID"
+          
+          # If AWS_ACCOUNT_ID is empty, get it directly
+          if [ -z "$AWS_ACCOUNT_ID" ]; then
+            echo "AWS Account ID is empty, getting it directly"
+            AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            echo "AWS Account ID from direct call: $AWS_ACCOUNT_ID"
+          fi
+          
+          # Ensure AWS_ACCOUNT_ID is not empty
+          if [ -z "$AWS_ACCOUNT_ID" ]; then
+            echo "Error: AWS Account ID is still empty"
+            exit 1
+          fi
+          
           ECR_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.PROJECT_PREFIX }}-${SERVICE}"
           
           echo "ECR URL: $ECR_URL"
