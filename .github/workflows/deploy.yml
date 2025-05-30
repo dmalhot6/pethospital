@@ -113,22 +113,18 @@ jobs:
           echo "Raw terraform output:"
           terraform output
           
-          # Get outputs and strip debug information
-          RAW_CLUSTER_NAME=$(terraform output -raw cluster_name)
-          RAW_APPLICATION_URL=$(terraform output -raw application_url)
+          # Write outputs to files to avoid capturing command text
+          terraform output -raw cluster_name > cluster_name.txt
+          terraform output -raw application_url > application_url.txt
           
-          # Strip debug information (everything after ::debug::)
-          CLUSTER_NAME=$(echo "$RAW_CLUSTER_NAME" | sed 's/::debug::.*$//')
-          APPLICATION_URL=$(echo "$RAW_APPLICATION_URL" | sed 's/::debug::.*$//')
+          # Read from files
+          CLUSTER_NAME=$(cat cluster_name.txt)
+          APPLICATION_URL=$(cat application_url.txt)
           
           echo "Clean Cluster name: $CLUSTER_NAME"
           echo "Clean Application URL: $APPLICATION_URL"
           
-          # Get ECR repository URLs
-          RAW_ECR_URLS=$(terraform output -json ecr_repository_urls)
-          echo "Raw ECR URLs: $RAW_ECR_URLS"
-          
-          # For ECR URLs, we need to construct them as a proper JSON object
+          # For ECR URLs, we'll use the AWS account ID to construct them
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           
           # Create a JSON structure for ECR URLs
