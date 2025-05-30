@@ -62,8 +62,8 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       cluster_name: ${{ steps.terraform-outputs.outputs.cluster_name }}
-      ecr_repository_urls: ${{ steps.terraform-outputs.outputs.ecr_repository_urls }}
       application_url: ${{ steps.terraform-outputs.outputs.application_url }}
+      aws_account_id: ${{ steps.get-aws-account.outputs.aws_account_id }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -139,23 +139,16 @@ jobs:
           echo "Extracted Cluster name: $CLUSTER_NAME"
           echo "Extracted Application URL: $APPLICATION_URL"
           
-          # For ECR URLs, use the AWS account ID to construct them
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          
           # Set environment variables for cluster name and application URL
           echo "CLUSTER_NAME=$CLUSTER_NAME" >> $GITHUB_ENV
           echo "APPLICATION_URL=$APPLICATION_URL" >> $GITHUB_ENV
-          
-          # Create ECR URLs for each service directly in environment variables
-          echo "ECR_PET_SERVICE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-pet-service" >> $GITHUB_ENV
-          echo "ECR_HOSPITAL_SERVICE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-hospital-service" >> $GITHUB_ENV
-          echo "ECR_DOCTOR_SERVICE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-doctor-service" >> $GITHUB_ENV
-          echo "ECR_BILLING_SERVICE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-billing-service" >> $GITHUB_ENV
-          echo "ECR_INSURANCE_SERVICE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-insurance-service" >> $GITHUB_ENV
-          echo "ECR_VISIT_SERVICE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-visit-service" >> $GITHUB_ENV
-          echo "ECR_VET_SERVICE=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-vet-service" >> $GITHUB_ENV
-          echo "ECR_FRONTEND=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${PROJECT_PREFIX}-frontend" >> $GITHUB_ENV
-      
+
+      - name: Get AWS Account ID
+        id: get-aws-account
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "aws_account_id=$AWS_ACCOUNT_ID" >> $GITHUB_OUTPUT
+
       - name: Set Job Outputs
         id: terraform-outputs
         run: |
@@ -164,7 +157,7 @@ jobs:
 
   build_and_push:
     name: Build and Push Docker Images
-    needs: terraform
+    needs: [terraform]
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -183,52 +176,22 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Extract ECR repository URL
-        id: extract-url
+      - name: Construct ECR URL
+        id: construct-ecr-url
         run: |
           SERVICE="${{ matrix.service }}"
+          AWS_ACCOUNT_ID="${{ needs.terraform.outputs.aws_account_id }}"
+          ECR_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.PROJECT_PREFIX }}-${SERVICE}"
           
-          # Map service name to the corresponding environment variable
-          case "$SERVICE" in
-            pet-service)
-              ECR_URL=$ECR_PET_SERVICE
-              ;;
-            hospital-service)
-              ECR_URL=$ECR_HOSPITAL_SERVICE
-              ;;
-            doctor-service)
-              ECR_URL=$ECR_DOCTOR_SERVICE
-              ;;
-            billing-service)
-              ECR_URL=$ECR_BILLING_SERVICE
-              ;;
-            insurance-service)
-              ECR_URL=$ECR_INSURANCE_SERVICE
-              ;;
-            visit-service)
-              ECR_URL=$ECR_VISIT_SERVICE
-              ;;
-            vet-service)
-              ECR_URL=$ECR_VET_SERVICE
-              ;;
-            frontend)
-              ECR_URL=$ECR_FRONTEND
-              ;;
-            *)
-              echo "Unknown service: $SERVICE"
-              exit 1
-              ;;
-          esac
-          
-          echo "Using ECR_URL: $ECR_URL for service: $SERVICE"
-          echo "ECR_URL=$ECR_URL" >> $GITHUB_ENV
+          echo "ECR URL: $ECR_URL"
+          echo "ecr_url=$ECR_URL" >> $GITHUB_OUTPUT
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
           context: ./backend/${{ matrix.service }}
           push: true
-          tags: ${{ env.ECR_URL }}:latest,${{ env.ECR_URL }}:${{ github.sha }}
+          tags: ${{ steps.construct-ecr-url.outputs.ecr_url }}:latest,${{ steps.construct-ecr-url.outputs.ecr_url }}:${{ github.sha }}
           build-args: |
             AWS_REGION=${{ env.AWS_REGION }}
 
