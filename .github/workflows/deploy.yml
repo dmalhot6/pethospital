@@ -1,0 +1,156 @@
+name: Deploy Infrastructure and Application
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+  TERRAFORM_VERSION: 1.5.7
+  ENVIRONMENT: dev
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  terraform:
+    name: Terraform
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Terraform Init
+        working-directory: ./infrastructure
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: ./infrastructure
+        run: terraform plan -var="environment=${{ env.ENVIRONMENT }}" -out=tfplan
+
+      - name: Terraform Apply
+        working-directory: ./infrastructure
+        run: terraform apply -auto-approve tfplan
+
+      - name: Export Terraform Outputs
+        working-directory: ./infrastructure
+        run: |
+          echo "CLUSTER_NAME=$(terraform output -raw cluster_name)" >> $GITHUB_ENV
+          echo "ECR_REPOSITORY_URLS=$(terraform output -json ecr_repository_urls)" >> $GITHUB_ENV
+          echo "APPLICATION_URL=$(terraform output -raw application_url)" >> $GITHUB_ENV
+
+  build_and_push:
+    name: Build and Push Docker Images
+    needs: terraform
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [pet-service, hospital-service, doctor-service, billing-service, insurance-service, visit-service, vet-service, frontend]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Extract ECR repository URL
+        id: extract-url
+        run: |
+          ECR_URLS=${{ needs.terraform.outputs.ECR_REPOSITORY_URLS }}
+          SERVICE=${{ matrix.service }}
+          ECR_URL=$(echo $ECR_URLS | jq -r ".\"$SERVICE\"")
+          echo "ECR_URL=$ECR_URL" >> $GITHUB_ENV
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v4
+        with:
+          context: ./backend/${{ matrix.service }}
+          push: true
+          tags: ${{ env.ECR_URL }}:latest,${{ env.ECR_URL }}:${{ github.sha }}
+          build-args: |
+            AWS_REGION=${{ env.AWS_REGION }}
+
+  deploy_to_eks:
+    name: Deploy to EKS
+    needs: [terraform, build_and_push]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name ${{ needs.terraform.outputs.CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
+
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
+          rm argocd-linux-amd64
+
+      - name: Deploy with ArgoCD
+        run: |
+          # Get ArgoCD admin password
+          ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+          
+          # Port forward ArgoCD server (in background)
+          kubectl port-forward svc/argocd-server -n argocd 8080:443 &
+          sleep 10
+          
+          # Login to ArgoCD
+          argocd login localhost:8080 --username admin --password $ARGOCD_PASSWORD --insecure
+          
+          # Create/update ArgoCD application
+          argocd app create pethospital \
+            --repo https://github.com/${{ github.repository }}.git \
+            --path k8s/overlays/${{ env.ENVIRONMENT }} \
+            --dest-server https://kubernetes.default.svc \
+            --dest-namespace pethospital-${{ env.ENVIRONMENT }} \
+            --sync-policy automated \
+            --auto-prune \
+            --self-heal \
+            --upsert
+          
+          # Sync application
+          argocd app sync pethospital
+
+      - name: Output Application URL
+        run: |
+          echo "Application URL: ${{ needs.terraform.outputs.APPLICATION_URL }}"
+          echo "APPLICATION_URL=${{ needs.terraform.outputs.APPLICATION_URL }}" >> $GITHUB_ENV
+
+  notify:
+    name: Notify Deployment Status
+    needs: [deploy_to_eks]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deployment Success
+        run: |
+          echo "Deployment completed successfully!"
+          echo "Application URL: ${{ env.APPLICATION_URL }}"

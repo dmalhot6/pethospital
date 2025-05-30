@@ -1,0 +1,25 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+
+namespace: pethospital-prod
+
+replicas:
+  - name: pet-service
+    count: 3
+  - name: hospital-service
+    count: 3
+  - name: doctor-service
+    count: 3
+  - name: frontend
+    count: 3
+
+configMapGenerator:
+  - name: pethospital-config
+    literals:
+      - ENVIRONMENT=prod
+
+patchesStrategicMerge:
+  - patches/deployment-patches.yaml
