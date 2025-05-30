@@ -109,22 +109,37 @@ jobs:
       - name: Get Terraform Outputs
         working-directory: ./infrastructure
         run: |
-          # Check what outputs are available
-          echo "Raw terraform output:"
-          terraform output
+          # Create a script to extract Terraform outputs
+          cat > extract_outputs.sh << 'EOF'
+          #!/bin/bash
           
-          # Write outputs to files to avoid capturing command text
-          terraform output -raw cluster_name > cluster_name.txt
-          terraform output -raw application_url > application_url.txt
+          # Run terraform output and capture the raw output
+          terraform_output=$(terraform output)
           
-          # Read from files
-          CLUSTER_NAME=$(cat cluster_name.txt)
-          APPLICATION_URL=$(cat application_url.txt)
+          # Extract cluster_name using grep and awk
+          cluster_name=$(echo "$terraform_output" | grep "^cluster_name = " | awk -F'"' '{print $2}')
+          echo "CLUSTER_NAME=$cluster_name"
           
-          echo "Clean Cluster name: $CLUSTER_NAME"
-          echo "Clean Application URL: $APPLICATION_URL"
+          # Extract application_url using grep and awk
+          application_url=$(echo "$terraform_output" | grep "^application_url = " | awk -F'"' '{print $2}')
+          echo "APPLICATION_URL=$application_url"
+          EOF
           
-          # For ECR URLs, we'll use the AWS account ID to construct them
+          # Make the script executable
+          chmod +x extract_outputs.sh
+          
+          # Run the script and capture the outputs
+          output=$(./extract_outputs.sh)
+          echo "$output"
+          
+          # Extract values from the script output
+          CLUSTER_NAME=$(echo "$output" | grep "^CLUSTER_NAME=" | cut -d= -f2)
+          APPLICATION_URL=$(echo "$output" | grep "^APPLICATION_URL=" | cut -d= -f2)
+          
+          echo "Extracted Cluster name: $CLUSTER_NAME"
+          echo "Extracted Application URL: $APPLICATION_URL"
+          
+          # For ECR URLs, use the AWS account ID to construct them
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           
           # Create a JSON structure for ECR URLs
