@@ -109,20 +109,23 @@ jobs:
       - name: Get Terraform Outputs
         working-directory: ./infrastructure
         run: |
-          # Get raw outputs with debug info
-          RAW_CLUSTER_NAME=$(terraform output -raw cluster_name)
-          RAW_APPLICATION_URL=$(terraform output -raw application_url)
+          # Get outputs and store in variables
+          CLUSTER_NAME_OUTPUT=$(terraform output -raw cluster_name || echo "")
+          APPLICATION_URL_OUTPUT=$(terraform output -raw application_url || echo "")
           
-          # Strip debug information (everything after ::debug::)
-          CLUSTER_NAME=$(echo "$RAW_CLUSTER_NAME" | sed 's/::debug::.*$//')
-          APPLICATION_URL=$(echo "$RAW_APPLICATION_URL" | sed 's/::debug::.*$//')
+          # Remove any trailing/leading whitespace and newlines
+          CLUSTER_NAME=$(echo "$CLUSTER_NAME_OUTPUT" | tr -d '\n' | xargs)
+          APPLICATION_URL=$(echo "$APPLICATION_URL_OUTPUT" | tr -d '\n' | xargs)
           
-          echo "Clean Cluster name: $CLUSTER_NAME"
-          echo "Clean Application URL: $APPLICATION_URL"
+          echo "Extracted Cluster name: '$CLUSTER_NAME'"
+          echo "Extracted Application URL: '$APPLICATION_URL'"
           
-          # Set environment variables
-          echo "CLUSTER_NAME=$CLUSTER_NAME" >> $GITHUB_ENV
-          echo "APPLICATION_URL=$APPLICATION_URL" >> $GITHUB_ENV
+          # Use a different approach to set environment variables
+          echo "CLUSTER_NAME=${CLUSTER_NAME}" > cluster_env.txt
+          echo "APPLICATION_URL=${APPLICATION_URL}" > app_url_env.txt
+          
+          cat cluster_env.txt >> $GITHUB_ENV
+          cat app_url_env.txt >> $GITHUB_ENV
 
       - name: Get AWS Account ID
         id: get-aws-account
