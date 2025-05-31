@@ -9,6 +9,9 @@ resources:
 
 namespace: pethospital-dev
 
-commonLabels:
-  app.kubernetes.io/part-of: pet-hospital
-  app.kubernetes.io/managed-by: kustomize
+# Use labels that won't affect selectors
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: pet-hospital
+      app.kubernetes.io/managed-by: kustomize
+    includeSelectors: false

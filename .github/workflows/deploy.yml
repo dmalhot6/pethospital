@@ -261,16 +261,24 @@ jobs:
           kubectl create namespace pethospital-dev --dry-run=client -o yaml | kubectl apply -f -
           kubectl label namespace pethospital-dev --overwrite argocd.argoproj.io/managed-by=argocd
           
-          # Create ECR registry secret
+          # Create ECR registry secret - fixed format
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           ECR_TOKEN=$(aws ecr get-login-password --region ${AWS_REGION})
           
-          kubectl create secret docker-registry ecr-registry-secret \
-            --namespace=pethospital-dev \
-            --docker-server=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com \
-            --docker-username=AWS \
-            --docker-password=${ECR_TOKEN} \
-            --dry-run=client -o yaml | kubectl apply -f -
+          # Create a proper Docker config JSON
+          DOCKER_CONFIG_JSON=$(echo -n "{\"auths\":{\"${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com\":{\"auth\":\"$(echo -n "AWS:${ECR_TOKEN}" | base64 -w 0)\"}}}" | base64 -w 0)
+          
+          # Create the secret with the proper format
+          cat <<EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: ecr-registry-secret
+            namespace: pethospital-dev
+          type: kubernetes.io/dockerconfigjson
+          data:
+            .dockerconfigjson: ${DOCKER_CONFIG_JSON}
+          EOF
 
       - name: Deploy with ArgoCD
         run: |
@@ -294,25 +302,11 @@ jobs:
           # Get AWS account ID and region for image substitution
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           
-          # Create a parameters file for kustomize
-          cat > kustomize-params.yaml << EOF
-          apiVersion: kustomize.config.k8s.io/v1beta1
-          kind: Kustomization
-          images:
-            - name: \${ECR_REPOSITORY_URL}/pet-service
-              newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/pet-hospital-pet-service
-              newTag: ${GITHUB_SHA}
-            - name: \${ECR_REPOSITORY_URL}/hospital-service
-              newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/pet-hospital-hospital-service
-              newTag: ${GITHUB_SHA}
-            - name: \${ECR_REPOSITORY_URL}/doctor-service
-              newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/pet-hospital-doctor-service
-              newTag: ${GITHUB_SHA}
-            - name: \${ECR_REPOSITORY_URL}/frontend
-              newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/pet-hospital-frontend
-              newTag: ${GITHUB_SHA}
-          EOF
+          # Delete the application if it exists to avoid immutable field errors
+          argocd app delete pethospital --cascade=false || true
+          sleep 5
           
+          # Create a new application
           argocd app create pethospital \
             --repo https://github.com/${{ github.repository }}.git \
             --path k8s/overlays/${{ needs.setup_state_storage.outputs.environment }} \
@@ -321,7 +315,6 @@ jobs:
             --sync-policy automated \
             --auto-prune \
             --self-heal \
-            --upsert \
             --revision $GITHUB_SHA
           
           # Wait for application to be created/updated before syncing
