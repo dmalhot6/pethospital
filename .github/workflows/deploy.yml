@@ -109,18 +109,32 @@ jobs:
       - name: Get Terraform Outputs
         working-directory: ./infrastructure
         run: |
-          # Get outputs and store in variables
-          CLUSTER_NAME_OUTPUT=$(terraform output -raw cluster_name || echo "")
-          APPLICATION_URL_OUTPUT=$(terraform output -raw application_url || echo "")
+          # Get outputs with all the debug info
+          FULL_CLUSTER_NAME=$(terraform output -raw cluster_name)
+          FULL_APPLICATION_URL=$(terraform output -raw application_url)
           
-          # Remove any trailing/leading whitespace and newlines
-          CLUSTER_NAME=$(echo "$CLUSTER_NAME_OUTPUT" | tr -d '\n' | xargs)
-          APPLICATION_URL=$(echo "$APPLICATION_URL_OUTPUT" | tr -d '\n' | xargs)
+          echo "Full Cluster name output: '$FULL_CLUSTER_NAME'"
+          echo "Full Application URL output: '$FULL_APPLICATION_URL'"
+          
+          # Extract just the stdout part using grep and sed
+          CLUSTER_NAME=$(echo "$FULL_CLUSTER_NAME" | grep -o "stdout: .*" | sed 's/stdout: //')
+          APPLICATION_URL=$(echo "$FULL_APPLICATION_URL" | grep -o "stdout: .*" | sed 's/stdout: //')
+          
+          # If grep didn't find the pattern, try a simpler approach
+          if [ -z "$CLUSTER_NAME" ]; then
+            # Just take the first line and remove any non-printable characters
+            CLUSTER_NAME=$(echo "$FULL_CLUSTER_NAME" | head -n 1 | tr -cd '[:print:]')
+          fi
+          
+          if [ -z "$APPLICATION_URL" ]; then
+            # Just take the first line and remove any non-printable characters
+            APPLICATION_URL=$(echo "$FULL_APPLICATION_URL" | head -n 1 | tr -cd '[:print:]')
+          fi
           
           echo "Extracted Cluster name: '$CLUSTER_NAME'"
           echo "Extracted Application URL: '$APPLICATION_URL'"
           
-          # Use a different approach to set environment variables
+          # Write to files and then to GITHUB_ENV to avoid any issues
           echo "CLUSTER_NAME=${CLUSTER_NAME}" > cluster_env.txt
           echo "APPLICATION_URL=${APPLICATION_URL}" > app_url_env.txt
           
