@@ -33,13 +33,6 @@ spec:
           image: ${ECR_REPOSITORY_URL}/pet-service:latest
           ports:
             - containerPort: 3000
-          env:
-            - name: PORT
-              value: "3000"
-            - name: AWS_REGION
-              value: "${AWS_REGION}"
-            - name: DYNAMODB_TABLE
-              value: "Pets"
           resources:
             limits:
               cpu: "500m"
@@ -59,6 +52,9 @@ spec:
               port: 3000
             initialDelaySeconds: 5
             periodSeconds: 5
+          imagePullPolicy: Always
+      imagePullSecrets:
+        - name: ecr-registry-secret
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler

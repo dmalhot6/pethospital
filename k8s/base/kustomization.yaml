@@ -7,4 +7,8 @@ resources:
   - doctor-service.yaml
   - frontend.yaml
 
-namespace: pethospital
+namespace: pethospital-dev
+
+commonLabels:
+  app.kubernetes.io/part-of: pet-hospital
+  app.kubernetes.io/managed-by: kustomize

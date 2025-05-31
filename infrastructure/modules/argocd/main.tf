@@ -21,6 +21,9 @@ resource "null_resource" "install_argocd" {
       # Wait for ArgoCD to be ready
       kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
       
+      # Create namespace for application
+      kubectl create namespace pethospital-dev --dry-run=client -o yaml | kubectl apply -f -
+      
       # Create ArgoCD application for the pet hospital services
       cat <<EOF | kubectl apply -f -
       apiVersion: argoproj.io/v1alpha1
@@ -36,7 +39,7 @@ resource "null_resource" "install_argocd" {
           path: k8s/overlays/${var.environment}
         destination:
           server: https://kubernetes.default.svc
-          namespace: pethospital
+          namespace: pethospital-dev
         syncPolicy:
           automated:
             prune: true

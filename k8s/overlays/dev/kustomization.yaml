@@ -3,6 +3,7 @@ kind: Kustomization
 
 resources:
   - ../../base
+  - ecr-secret.yaml
 
 namespace: pethospital-dev
 
@@ -20,6 +21,21 @@ configMapGenerator:
   - name: pethospital-config
     literals:
       - ENVIRONMENT=dev
+
+# Add image transformations to replace placeholders with actual ECR URLs
+images:
+  - name: ${ECR_REPOSITORY_URL}/pet-service
+    newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/pet-hospital-pet-service
+    newTag: latest
+  - name: ${ECR_REPOSITORY_URL}/hospital-service
+    newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/pet-hospital-hospital-service
+    newTag: latest
+  - name: ${ECR_REPOSITORY_URL}/doctor-service
+    newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/pet-hospital-doctor-service
+    newTag: latest
+  - name: ${ECR_REPOSITORY_URL}/frontend
+    newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/pet-hospital-frontend
+    newTag: latest
 
 patchesStrategicMerge:
   - patches/deployment-patches.yaml

@@ -109,37 +109,18 @@ jobs:
       - name: Get Terraform Outputs
         working-directory: ./infrastructure
         run: |
-          # Create a script to extract Terraform outputs
-          cat > extract_outputs.sh << 'EOF'
-          #!/bin/bash
+          # Write outputs to files to avoid capturing command text
+          terraform output -raw cluster_name > cluster_name.txt
+          terraform output -raw application_url > application_url.txt
           
-          # Run terraform output and capture the raw output
-          terraform_output=$(terraform output)
+          # Read from files
+          CLUSTER_NAME=$(cat cluster_name.txt)
+          APPLICATION_URL=$(cat application_url.txt)
           
-          # Extract cluster_name using grep and awk
-          cluster_name=$(echo "$terraform_output" | grep "^cluster_name = " | awk -F'"' '{print $2}')
-          echo "CLUSTER_NAME=$cluster_name"
+          echo "Clean Cluster name: $CLUSTER_NAME"
+          echo "Clean Application URL: $APPLICATION_URL"
           
-          # Extract application_url using grep and awk
-          application_url=$(echo "$terraform_output" | grep "^application_url = " | awk -F'"' '{print $2}')
-          echo "APPLICATION_URL=$application_url"
-          EOF
-          
-          # Make the script executable
-          chmod +x extract_outputs.sh
-          
-          # Run the script and capture the outputs
-          output=$(./extract_outputs.sh)
-          echo "$output"
-          
-          # Extract values from the script output
-          CLUSTER_NAME=$(echo "$output" | grep "^CLUSTER_NAME=" | cut -d= -f2)
-          APPLICATION_URL=$(echo "$output" | grep "^APPLICATION_URL=" | cut -d= -f2)
-          
-          echo "Extracted Cluster name: $CLUSTER_NAME"
-          echo "Extracted Application URL: $APPLICATION_URL"
-          
-          # Set environment variables for cluster name and application URL
+          # Set environment variables
           echo "CLUSTER_NAME=$CLUSTER_NAME" >> $GITHUB_ENV
           echo "APPLICATION_URL=$APPLICATION_URL" >> $GITHUB_ENV
 
@@ -256,16 +237,23 @@ jobs:
           echo "Waiting for ArgoCD server to be ready..."
           kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
 
-      - name: Create namespace
+      - name: Create namespace and ECR secret
         run: |
-          # Create both namespaces to ensure compatibility
-          echo "Creating namespace: pet-hospital-dev"
-          kubectl create namespace pet-hospital-dev --dry-run=client -o yaml | kubectl apply -f -
-          kubectl label namespace pet-hospital-dev --overwrite argocd.argoproj.io/managed-by=argocd
-          
+          # Create namespace
           echo "Creating namespace: pethospital-dev"
           kubectl create namespace pethospital-dev --dry-run=client -o yaml | kubectl apply -f -
           kubectl label namespace pethospital-dev --overwrite argocd.argoproj.io/managed-by=argocd
+          
+          # Create ECR registry secret
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_TOKEN=$(aws ecr get-login-password --region ${AWS_REGION})
+          
+          kubectl create secret docker-registry ecr-registry-secret \
+            --namespace=pethospital-dev \
+            --docker-server=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com \
+            --docker-username=AWS \
+            --docker-password=${ECR_TOKEN} \
+            --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Deploy with ArgoCD
         run: |
@@ -286,6 +274,28 @@ jobs:
           NAMESPACE="pethospital-dev"
           echo "Using namespace: $NAMESPACE"
           
+          # Get AWS account ID and region for image substitution
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          
+          # Create a parameters file for kustomize
+          cat > kustomize-params.yaml << EOF
+          apiVersion: kustomize.config.k8s.io/v1beta1
+          kind: Kustomization
+          images:
+            - name: \${ECR_REPOSITORY_URL}/pet-service
+              newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/pet-hospital-pet-service
+              newTag: ${GITHUB_SHA}
+            - name: \${ECR_REPOSITORY_URL}/hospital-service
+              newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/pet-hospital-hospital-service
+              newTag: ${GITHUB_SHA}
+            - name: \${ECR_REPOSITORY_URL}/doctor-service
+              newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/pet-hospital-doctor-service
+              newTag: ${GITHUB_SHA}
+            - name: \${ECR_REPOSITORY_URL}/frontend
+              newName: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/pet-hospital-frontend
+              newTag: ${GITHUB_SHA}
+          EOF
+          
           argocd app create pethospital \
             --repo https://github.com/${{ github.repository }}.git \
             --path k8s/overlays/${{ needs.setup_state_storage.outputs.environment }} \
@@ -294,7 +304,8 @@ jobs:
             --sync-policy automated \
             --auto-prune \
             --self-heal \
-            --upsert
+            --upsert \
+            --revision $GITHUB_SHA
           
           # Wait for application to be created/updated before syncing
           echo "Waiting for application to be ready before syncing..."
@@ -313,11 +324,6 @@ jobs:
           fi
           
           # Wait for sync to complete
-          echo "Waiting for sync to complete..."
-          argocd app wait pethospital --timeout 300 || echo "Wait timed out, but continuing as app may still be syncing"
-          
-          # Kill the port-forwarding process
-          kill $PF_PID || true
           echo "Waiting for sync to complete..."
           argocd app wait pethospital --timeout 300 || echo "Wait timed out, but continuing as app may still be syncing"
           

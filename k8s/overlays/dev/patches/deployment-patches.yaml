@@ -10,6 +10,8 @@ spec:
           env:
             - name: ENVIRONMENT
               value: "dev"
+            - name: AWS_REGION
+              value: "us-west-2"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -23,6 +25,8 @@ spec:
           env:
             - name: ENVIRONMENT
               value: "dev"
+            - name: AWS_REGION
+              value: "us-west-2"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -36,6 +40,8 @@ spec:
           env:
             - name: ENVIRONMENT
               value: "dev"
+            - name: AWS_REGION
+              value: "us-west-2"
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -49,3 +55,5 @@ spec:
           env:
             - name: ENVIRONMENT
               value: "dev"
+            - name: API_URL
+              value: "http://frontend-ingress"

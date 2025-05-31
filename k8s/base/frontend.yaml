@@ -52,6 +52,9 @@ spec:
               port: 80
             initialDelaySeconds: 5
             periodSeconds: 5
+          imagePullPolicy: Always
+      imagePullSecrets:
+        - name: ecr-registry-secret
 ---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
@@ -80,6 +83,7 @@ metadata:
     kubernetes.io/ingress.class: alb
     alb.ingress.kubernetes.io/scheme: internet-facing
     alb.ingress.kubernetes.io/target-type: ip
+    alb.ingress.kubernetes.io/healthcheck-path: /
 spec:
   rules:
     - http:
