@@ -109,13 +109,13 @@ jobs:
       - name: Get Terraform Outputs
         working-directory: ./infrastructure
         run: |
-          # Write outputs to files to avoid capturing command text
-          terraform output -raw cluster_name > cluster_name.txt
-          terraform output -raw application_url > application_url.txt
+          # Get raw outputs with debug info
+          RAW_CLUSTER_NAME=$(terraform output -raw cluster_name)
+          RAW_APPLICATION_URL=$(terraform output -raw application_url)
           
-          # Read from files
-          CLUSTER_NAME=$(cat cluster_name.txt)
-          APPLICATION_URL=$(cat application_url.txt)
+          # Strip debug information (everything after ::debug::)
+          CLUSTER_NAME=$(echo "$RAW_CLUSTER_NAME" | sed 's/::debug::.*$//')
+          APPLICATION_URL=$(echo "$RAW_APPLICATION_URL" | sed 's/::debug::.*$//')
           
           echo "Clean Cluster name: $CLUSTER_NAME"
           echo "Clean Application URL: $APPLICATION_URL"
