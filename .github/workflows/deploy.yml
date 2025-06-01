@@ -1,6 +1,9 @@
 name: Deploy Infrastructure and Application
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       environment:
@@ -339,6 +342,32 @@ jobs:
           
           # Kill the port-forwarding process
           kill $PF_PID || true
+
+      - name: Debug Pod Status
+        run: |
+          echo "Checking pod status in pethospital-dev namespace..."
+          kubectl get pods -n pethospital-dev
+          
+          echo "Checking pod details..."
+          for pod in $(kubectl get pods -n pethospital-dev -o jsonpath='{.items[*].metadata.name}'); do
+            echo "==== Details for pod: $pod ===="
+            kubectl describe pod $pod -n pethospital-dev
+          done
+          
+          echo "Checking pod logs..."
+          for pod in $(kubectl get pods -n pethospital-dev -o jsonpath='{.items[*].metadata.name}'); do
+            echo "==== Logs for pod: $pod ===="
+            kubectl logs $pod -n pethospital-dev --tail=50 || echo "Failed to get logs"
+          done
+          
+          echo "Checking events..."
+          kubectl get events -n pethospital-dev --sort-by='.lastTimestamp'
+          
+          echo "Checking ingress status..."
+          kubectl get ingress -n pethospital-dev -o wide
+          
+          echo "Checking services..."
+          kubectl get services -n pethospital-dev -o wide
 
       - name: Output Application URL
         run: |
