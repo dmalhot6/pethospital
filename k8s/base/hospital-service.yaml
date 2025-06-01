@@ -30,7 +30,7 @@ spec:
     spec:
       containers:
         - name: hospital-service
-          image: ${ECR_REPOSITORY_URL}/hospital-service:latest
+          image: 622037664315.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-hospital-service:latest
           ports:
             - containerPort: 3000
           resources:
