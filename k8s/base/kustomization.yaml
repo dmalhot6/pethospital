@@ -6,12 +6,6 @@ resources:
   - hospital-service.yaml
   - doctor-service.yaml
   - frontend.yaml
+  - frontend-ingress.yaml
 
 namespace: pethospital-dev
-
-# Use labels that won't affect selectors
-labels:
-  - pairs:
-      app.kubernetes.io/part-of: pet-hospital
-      app.kubernetes.io/managed-by: kustomize
-    includeSelectors: false

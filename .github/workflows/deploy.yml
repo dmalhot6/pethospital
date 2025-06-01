@@ -295,20 +295,20 @@ jobs:
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           ECR_TOKEN=$(aws ecr get-login-password --region ${AWS_REGION})
           
-          # Create a proper Docker config JSON
-          DOCKER_CONFIG_JSON=$(echo -n "{\"auths\":{\"${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com\":{\"auth\":\"$(echo -n "AWS:${ECR_TOKEN}" | base64 -w 0)\"}}}" | base64 -w 0)
+          # Create a proper Docker config JSON with explicit base64 encoding
+          DOCKER_CONFIG="{\"auths\":{\"${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com\":{\"auth\":\"$(echo -n "AWS:${ECR_TOKEN}" | base64 -w 0)\"}}}"
           
-          # Create the secret with the proper format
-          cat <<EOF | kubectl apply -f -
-          apiVersion: v1
-          kind: Secret
-          metadata:
-            name: ecr-registry-secret
-            namespace: pethospital-dev
-          type: kubernetes.io/dockerconfigjson
-          data:
-            .dockerconfigjson: ${DOCKER_CONFIG_JSON}
-          EOF
+          # Create the secret directly without base64 encoding the entire JSON
+          kubectl create secret docker-registry ecr-registry-secret \
+            --namespace=pethospital-dev \
+            --docker-server=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com \
+            --docker-username=AWS \
+            --docker-password=${ECR_TOKEN} \
+            --dry-run=client -o yaml | kubectl apply -f -
+          
+          # Verify the secret was created correctly
+          echo "Verifying ECR registry secret..."
+          kubectl get secret ecr-registry-secret -n pethospital-dev
 
       - name: Deploy with ArgoCD
         run: |
