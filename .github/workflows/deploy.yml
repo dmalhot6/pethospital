@@ -429,17 +429,24 @@ jobs:
             if [ "$CURRENT_NORMALIZED" != "$NEW_NORMALIZED" ]; then
               echo "Policy needs to be updated..."
               
-              # List all policy versions
-              VERSIONS=$(aws iam list-policy-versions --policy-arn $POLICY_ARN --query 'Versions[?IsDefaultVersion==`false`].VersionId' --output text)
+              # List all non-default policy versions
+              echo "Listing policy versions..."
+              aws iam list-policy-versions --policy-arn $POLICY_ARN
               
-              # Delete oldest non-default version if we have 5 versions
-              if [ $(echo "$VERSIONS" | wc -w) -ge 4 ]; then
-                OLDEST_VERSION=$(echo "$VERSIONS" | tr ' ' '\n' | sort | head -1)
+              # Get the number of versions
+              VERSION_COUNT=$(aws iam list-policy-versions --policy-arn $POLICY_ARN --query 'length(Versions)' --output text)
+              echo "Current version count: $VERSION_COUNT"
+              
+              # If we have 5 versions, we need to delete one
+              if [ "$VERSION_COUNT" -ge 5 ]; then
+                # Get the oldest non-default version ID
+                OLDEST_VERSION=$(aws iam list-policy-versions --policy-arn $POLICY_ARN --query 'Versions[?IsDefaultVersion==`false`].VersionId' --output text | tr '\t' '\n' | head -1)
                 echo "Deleting oldest policy version: $OLDEST_VERSION"
                 aws iam delete-policy-version --policy-arn $POLICY_ARN --version-id $OLDEST_VERSION
               fi
               
               # Create new policy version
+              echo "Creating new policy version..."
               aws iam create-policy-version --policy-arn $POLICY_ARN --policy-document file://alb-policy.json --set-as-default
               echo "IAM policy updated successfully"
             else
