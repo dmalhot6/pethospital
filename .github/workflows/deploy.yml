@@ -225,19 +225,72 @@ jobs:
         run: |
           echo "Fixing frontend nginx.conf to handle missing services..."
           
-          # Replace billing-service configuration
-          sed -i 's|location /api/billing {.*proxy_cache_bypass.*}|location /api/billing {\n        return 501 '"'"'{"error": "Billing service not yet implemented"}'"'"';\n        add_header Content-Type application/json;\n    }|g' ./frontend/nginx.conf
+          # Create a completely new nginx.conf file with all the fixes
+          cat > ./frontend/nginx.conf << 'EOF'
+          server {
+              listen 80;
+              server_name localhost;
+              root /usr/share/nginx/html;
+              index index.html;
+
+              location / {
+                  try_files $uri $uri/ /index.html;
+              }
+
+              location /api/pets {
+                  proxy_pass http://pet-service:3000/pets;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_cache_bypass $http_upgrade;
+              }
+
+              location /api/hospitals {
+                  proxy_pass http://hospital-service:3000/hospitals;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_cache_bypass $http_upgrade;
+              }
+
+              location /api/doctors {
+                  proxy_pass http://doctor-service:3000/doctors;
+                  proxy_http_version 1.1;
+                  proxy_set_header Upgrade $http_upgrade;
+                  proxy_set_header Connection 'upgrade';
+                  proxy_set_header Host $host;
+                  proxy_cache_bypass $http_upgrade;
+              }
+
+              # Billing service not yet implemented
+              location /api/billing {
+                  return 501 '{"error": "Billing service not yet implemented"}';
+                  add_header Content-Type application/json;
+              }
+
+              # Insurance service not yet implemented
+              location /api/insurance {
+                  return 501 '{"error": "Insurance service not yet implemented"}';
+                  add_header Content-Type application/json;
+              }
+
+              # Visit service not yet implemented
+              location /api/visits {
+                  return 501 '{"error": "Visit service not yet implemented"}';
+                  add_header Content-Type application/json;
+              }
+
+              # Vet service not yet implemented
+              location /api/vets {
+                  return 501 '{"error": "Vet service not yet implemented"}';
+                  add_header Content-Type application/json;
+              }
+          }
+          EOF
           
-          # Replace insurance-service configuration
-          sed -i 's|location /api/insurance {.*proxy_cache_bypass.*}|location /api/insurance {\n        return 501 '"'"'{"error": "Insurance service not yet implemented"}'"'"';\n        add_header Content-Type application/json;\n    }|g' ./frontend/nginx.conf
-          
-          # Replace visit-service configuration
-          sed -i 's|location /api/visits {.*proxy_cache_bypass.*}|location /api/visits {\n        return 501 '"'"'{"error": "Visit service not yet implemented"}'"'"';\n        add_header Content-Type application/json;\n    }|g' ./frontend/nginx.conf
-          
-          # Replace vet-service configuration
-          sed -i 's|location /api/vets {.*proxy_cache_bypass.*}|location /api/vets {\n        return 501 '"'"'{"error": "Vet service not yet implemented"}'"'"';\n        add_header Content-Type application/json;\n    }|g' ./frontend/nginx.conf
-          
-          echo "Modified nginx.conf:"
+          echo "Created new nginx.conf:"
           cat ./frontend/nginx.conf
 
       - name: Build and push Docker image
@@ -365,7 +418,9 @@ jobs:
             aws iam create-policy-version --policy-arn $POLICY_ARN --policy-document file://alb-policy.json --set-as-default
             echo "IAM policy updated successfully"
           else
-            echo "IAM policy not found, skipping update"
+            echo "IAM policy not found, creating new policy..."
+            aws iam create-policy --policy-name pet-hospital-eks-cluster-AWSLoadBalancerControllerIAMPolicy --policy-document file://alb-policy.json
+            echo "IAM policy created successfully"
           fi
           
       - name: Increase IP allocation for AWS CNI
@@ -433,8 +488,93 @@ jobs:
             fi
           done
           
-          echo "Updated frontend.yaml:"
-          cat ./k8s/base/frontend.yaml
+          # Update deployment patches to include explicit image references
+          echo "Updating deployment patches..."
+          cat > ./k8s/overlays/dev/patches/deployment-patches.yaml << EOF
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: pet-service
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: pet-service
+                    env:
+                      - name: ENVIRONMENT
+                        value: "dev"
+                      - name: AWS_REGION
+                        value: "us-west-2"
+                    image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-pet-service:latest
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: hospital-service
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: hospital-service
+                    env:
+                      - name: ENVIRONMENT
+                        value: "dev"
+                      - name: AWS_REGION
+                        value: "us-west-2"
+                    image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-hospital-service:latest
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: doctor-service
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: doctor-service
+                    env:
+                      - name: ENVIRONMENT
+                        value: "dev"
+                      - name: AWS_REGION
+                        value: "us-west-2"
+                    image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-doctor-service:latest
+          ---
+          apiVersion: apps/v1
+          kind: Deployment
+          metadata:
+            name: frontend
+          spec:
+            template:
+              spec:
+                containers:
+                  - name: frontend
+                    env:
+                      - name: ENVIRONMENT
+                        value: "dev"
+                      - name: API_URL
+                        value: "http://frontend-ingress"
+                    image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-frontend:latest
+          EOF
+          
+          echo "Updated deployment patches:"
+          cat ./k8s/overlays/dev/patches/deployment-patches.yaml
+          
+          # Update ECR secret with proper format
+          echo "Updating ECR secret..."
+          cat > ./k8s/overlays/dev/ecr-secret.yaml << EOF
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: ecr-registry-secret
+            namespace: pethospital-dev
+          type: kubernetes.io/dockerconfigjson
+          data:
+            # This is a placeholder that will be replaced by the actual credentials in the GitHub workflow
+            .dockerconfigjson: eyJhdXRocyI6eyIke0FXU19BQ0NPVU5UX0lEfS5ka3IuZWNyLiR7QVdTX1JFR0lPTn0uYW1hem9uYXdzLmNvbSI6eyJhdXRoIjoiUVZkVE9rVkRVaUJRUVZOVFYwOVNSQT09In19fQ==
+          EOF
+          
+          echo "Updated ECR secret:"
+          cat ./k8s/overlays/dev/ecr-secret.yaml
 
       - name: Deploy with ArgoCD
         run: |
