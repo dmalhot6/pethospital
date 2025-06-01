@@ -57,8 +57,24 @@ jobs:
         run: |
           echo "Configuring ArgoCD server for ingress access..."
           
-          # Patch ArgoCD server to work with ingress
-          kubectl patch configmap argocd-cmd-params-cm -n argocd --type merge -p '{"data":{"server.rootpath":"/","server.insecure":"true"}}'
+          # Create a patch file for more extensive configuration
+          cat > argocd-cm-patch.yaml << EOF
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: argocd-cmd-params-cm
+            namespace: argocd
+          data:
+            server.rootpath: "/"
+            server.insecure: "true"
+            server.enable.gzip: "true"
+            server.basehref: "/"
+            server.log.format: "text"
+            server.log.level: "debug"
+          EOF
+          
+          # Apply the patch
+          kubectl apply -f argocd-cm-patch.yaml
           
           # Restart ArgoCD server to apply changes
           kubectl rollout restart deployment argocd-server -n argocd
@@ -88,6 +104,9 @@ jobs:
               alb.ingress.kubernetes.io/healthcheck-protocol: HTTPS
               alb.ingress.kubernetes.io/success-codes: '200'
               alb.ingress.kubernetes.io/target-group-attributes: stickiness.enabled=true,stickiness.lb_cookie.duration_seconds=3600
+              alb.ingress.kubernetes.io/load-balancer-attributes: idle_timeout.timeout_seconds=600
+              alb.ingress.kubernetes.io/group.name: argocd
+              alb.ingress.kubernetes.io/ssl-policy: ELBSecurityPolicy-TLS-1-2-2017-01
           spec:
             rules:
               - http:
@@ -107,6 +126,60 @@ jobs:
           # Wait for the Ingress to be created
           echo "Waiting for ArgoCD Ingress to be created..."
           sleep 30
+
+      - name: Configure ALB Security Group
+        run: |
+          echo "Configuring ALB security group..."
+          
+          # Get the ALB ARN
+          ALB_ARN=$(aws elbv2 describe-load-balancers --query "LoadBalancers[?contains(DNSName, 'k8s-argocd')].LoadBalancerArn" --output text)
+          
+          if [ -n "$ALB_ARN" ]; then
+            # Get the security group ID
+            SG_ID=$(aws elbv2 describe-load-balancers --load-balancer-arns $ALB_ARN --query "LoadBalancers[0].SecurityGroups[0]" --output text)
+            
+            echo "ALB Security Group ID: $SG_ID"
+            
+            # Ensure the security group allows inbound traffic on port 80
+            aws ec2 authorize-security-group-ingress \
+              --group-id $SG_ID \
+              --protocol tcp \
+              --port 80 \
+              --cidr 0.0.0.0/0 || echo "Inbound rule already exists"
+          else
+            echo "ALB not found or still being created"
+          fi
+          
+          # Wait a bit more for the ALB to be fully configured
+          echo "Waiting for ALB to be fully configured..."
+          sleep 30
+
+      - name: Debug ArgoCD Setup
+        run: |
+          echo "Debugging ArgoCD setup..."
+          
+          # Check ArgoCD pods
+          echo "ArgoCD pods:"
+          kubectl get pods -n argocd
+          
+          # Check ArgoCD services
+          echo "ArgoCD services:"
+          kubectl get svc -n argocd
+          
+          # Check ArgoCD ingress
+          echo "ArgoCD ingress:"
+          kubectl get ingress -n argocd -o yaml
+          
+          # Check ALB target groups
+          echo "ALB target groups:"
+          aws elbv2 describe-target-groups --query "TargetGroups[?contains(TargetGroupName, 'argocd')]"
+          
+          # Check ALB target health
+          TG_ARN=$(aws elbv2 describe-target-groups --query "TargetGroups[?contains(TargetGroupName, 'argocd')].TargetGroupArn" --output text)
+          if [ -n "$TG_ARN" ]; then
+            echo "Target health:"
+            aws elbv2 describe-target-health --target-group-arn $TG_ARN
+          fi
           
           # Get the Ingress URL
           ARGOCD_URL=$(kubectl get ingress argocd-server-ingress -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
@@ -120,4 +193,43 @@ jobs:
             echo "ArgoCD admin password: $ARGOCD_PASSWORD"
           else
             echo "ArgoCD Ingress URL not available yet. Check the AWS Console for the ALB URL."
+          fi
+
+      - name: Create Direct Service Access
+        run: |
+          echo "Creating a direct service access as a backup method..."
+          
+          # Create a LoadBalancer service for direct access
+          cat > argocd-lb-service.yaml << EOF
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: argocd-server-lb
+            namespace: argocd
+          spec:
+            ports:
+            - name: http
+              port: 80
+              protocol: TCP
+              targetPort: 8080
+            selector:
+              app.kubernetes.io/name: argocd-server
+            type: LoadBalancer
+          EOF
+          
+          # Apply the service
+          kubectl apply -f argocd-lb-service.yaml
+          
+          # Wait for the service to get an external IP
+          echo "Waiting for LoadBalancer service to get an external IP..."
+          sleep 30
+          
+          # Get the LoadBalancer URL
+          LB_URL=$(kubectl get svc argocd-server-lb -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          
+          if [ -n "$LB_URL" ]; then
+            echo "ArgoCD is also accessible directly at: http://${LB_URL}"
+            echo "ARGOCD_LB_URL=http://${LB_URL}" >> $GITHUB_ENV
+          else
+            echo "Direct LoadBalancer URL not available yet."
           fi
