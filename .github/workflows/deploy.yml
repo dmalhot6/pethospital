@@ -342,6 +342,17 @@ jobs:
           
           # Kill the port-forwarding process
           kill $PF_PID || true
+          
+      - name: Delete and recreate pods
+        run: |
+          echo "Deleting all pods in pethospital-dev namespace to force recreation with correct image names..."
+          kubectl delete pods --all -n pethospital-dev
+          
+          echo "Waiting for pods to be recreated..."
+          sleep 30
+          
+          echo "Checking pod status after recreation..."
+          kubectl get pods -n pethospital-dev
 
       - name: Debug Pod Status
         run: |

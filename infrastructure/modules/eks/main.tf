@@ -136,7 +136,7 @@ resource "aws_iam_role" "aws_load_balancer_controller" {
   })
 }
 
-# Create IAM policy for AWS Load Balancer Controller
+# Update the AWS Load Balancer Controller IAM policy
 resource "aws_iam_policy" "aws_load_balancer_controller" {
   name        = "${var.cluster_name}-AWSLoadBalancerControllerIAMPolicy"
   description = "IAM policy for AWS Load Balancer Controller"
