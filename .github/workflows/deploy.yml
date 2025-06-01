@@ -1,3 +1,262 @@
+name: Deploy Infrastructure and Application
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy (dev or prod)'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - prod
+
+env:
+  AWS_REGION: us-west-2
+  TERRAFORM_VERSION: 1.5.7
+  PROJECT_PREFIX: pet-hospital
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  setup_state_storage:
+    name: Setup Terraform State Storage
+    runs-on: ubuntu-latest
+    outputs:
+      environment: ${{ steps.set-env.outputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set environment
+        id: set-env
+        run: |
+          if [ "${{ github.event.inputs.environment }}" != "" ]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Terraform State Storage
+        run: |
+          # Check if S3 bucket already exists
+          if aws s3api head-bucket --bucket ${{ env.PROJECT_PREFIX }}-terraform-state 2>/dev/null; then
+            echo "Terraform state storage already exists. Skipping creation."
+          else
+            echo "Creating Terraform state storage..."
+            ./infrastructure/setup-state-storage.sh --prefix ${{ env.PROJECT_PREFIX }} --region ${{ env.AWS_REGION }}
+          fi
+
+  terraform:
+    name: Terraform
+    needs: setup_state_storage
+    runs-on: ubuntu-latest
+    outputs:
+      cluster_name: ${{ steps.terraform-outputs.outputs.cluster_name }}
+      application_url: ${{ steps.terraform-outputs.outputs.application_url }}
+      aws_account_id: ${{ steps.get-aws-account.outputs.aws_account_id }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      - name: Install kubectl
+        uses: azure/setup-kubectl@v3
+        with:
+          version: 'latest'
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'latest'
+
+      - name: Terraform Init
+        working-directory: ./infrastructure
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: ./infrastructure
+        run: |
+          if [ "${{ needs.setup_state_storage.outputs.environment }}" == "prod" ]; then
+            terraform plan -var-file=environments/prod.tfvars -out=tfplan
+          else
+            terraform plan -var-file=environments/terraform.tfvars -out=tfplan
+          fi
+
+      - name: Terraform Apply
+        working-directory: ./infrastructure
+        run: terraform apply -auto-approve tfplan
+
+      - name: Get Terraform Outputs
+        working-directory: ./infrastructure
+        run: |
+          # Get outputs with all the debug info
+          FULL_CLUSTER_NAME=$(terraform output -raw cluster_name)
+          FULL_APPLICATION_URL=$(terraform output -raw application_url)
+          
+          echo "Full Cluster name output: '$FULL_CLUSTER_NAME'"
+          echo "Full Application URL output: '$FULL_APPLICATION_URL'"
+          
+          # Extract just the stdout part using grep and sed
+          CLUSTER_NAME=$(echo "$FULL_CLUSTER_NAME" | grep -o "stdout: .*" | sed 's/stdout: //')
+          APPLICATION_URL=$(echo "$FULL_APPLICATION_URL" | grep -o "stdout: .*" | sed 's/stdout: //')
+          
+          # If grep didn't find the pattern, try a simpler approach
+          if [ -z "$CLUSTER_NAME" ]; then
+            # Just take the first line and remove any non-printable characters
+            CLUSTER_NAME=$(echo "$FULL_CLUSTER_NAME" | head -n 1 | tr -cd '[:print:]')
+          fi
+          
+          if [ -z "$APPLICATION_URL" ]; then
+            # Just take the first line and remove any non-printable characters
+            APPLICATION_URL=$(echo "$FULL_APPLICATION_URL" | head -n 1 | tr -cd '[:print:]')
+          fi
+          
+          echo "Extracted Cluster name: '$CLUSTER_NAME'"
+          echo "Extracted Application URL: '$APPLICATION_URL'"
+          
+          # Write to files and then to GITHUB_ENV to avoid any issues
+          echo "CLUSTER_NAME=${CLUSTER_NAME}" > cluster_env.txt
+          echo "APPLICATION_URL=${APPLICATION_URL}" > app_url_env.txt
+          
+          cat cluster_env.txt >> $GITHUB_ENV
+          cat app_url_env.txt >> $GITHUB_ENV
+
+      - name: Get AWS Account ID
+        id: get-aws-account
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "AWS Account ID: $AWS_ACCOUNT_ID"
+          echo "aws_account_id=$AWS_ACCOUNT_ID" >> $GITHUB_OUTPUT
+
+      - name: Set Job Outputs
+        id: terraform-outputs
+        run: |
+          echo "cluster_name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
+          echo "application_url=$APPLICATION_URL" >> $GITHUB_OUTPUT
+
+  build_and_push:
+    name: Build and Push Docker Images
+    needs: [terraform]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [pet-service, hospital-service, doctor-service, billing-service, insurance-service, visit-service, vet-service, frontend]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Construct ECR URL
+        id: construct-ecr-url
+        run: |
+          SERVICE="${{ matrix.service }}"
+          AWS_ACCOUNT_ID="${{ needs.terraform.outputs.aws_account_id }}"
+          
+          echo "Service: $SERVICE"
+          echo "AWS Account ID from output: $AWS_ACCOUNT_ID"
+          
+          # If AWS_ACCOUNT_ID is empty, get it directly
+          if [ -z "$AWS_ACCOUNT_ID" ]; then
+            echo "AWS Account ID is empty, getting it directly"
+            AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+            echo "AWS Account ID from direct call: $AWS_ACCOUNT_ID"
+          fi
+          
+          # Ensure AWS_ACCOUNT_ID is not empty
+          if [ -z "$AWS_ACCOUNT_ID" ]; then
+            echo "Error: AWS Account ID is still empty"
+            exit 1
+          fi
+          
+          ECR_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${{ env.AWS_REGION }}.amazonaws.com/${{ env.PROJECT_PREFIX }}-${SERVICE}"
+          
+          echo "ECR URL: $ECR_URL"
+          echo "ecr_url=$ECR_URL" >> $GITHUB_OUTPUT
+
+      - name: Check if service directory exists
+        id: check-dir
+        run: |
+          SERVICE="${{ matrix.service }}"
+          DIR_PATH="${{ matrix.service == 'frontend' && './frontend' || format('./backend/{0}', matrix.service) }}"
+          
+          if [ -d "$DIR_PATH" ]; then
+            echo "Directory $DIR_PATH exists"
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Directory $DIR_PATH does not exist, skipping"
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and push Docker image
+        if: steps.check-dir.outputs.exists == 'true'
+        uses: docker/build-push-action@v4
+        with:
+          context: ${{ matrix.service == 'frontend' && './frontend' || format('./backend/{0}', matrix.service) }}
+          push: true
+          tags: ${{ steps.construct-ecr-url.outputs.ecr_url }}:latest,${{ steps.construct-ecr-url.outputs.ecr_url }}:${{ github.sha }}
+          build-args: |
+            AWS_REGION=${{ env.AWS_REGION }}
+
+  deploy_to_eks:
+    name: Deploy to EKS
+    needs: [setup_state_storage, terraform, build_and_push]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: aws eks update-kubeconfig --name ${{ needs.terraform.outputs.cluster_name }} --region ${{ env.AWS_REGION }}
+
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o argocd-linux-amd64 https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          sudo install -m 555 argocd-linux-amd64 /usr/local/bin/argocd
+          rm argocd-linux-amd64
+
+      - name: Wait for ArgoCD to be ready
+        run: |
+          echo "Waiting for ArgoCD server to be ready..."
+          kubectl wait --for=condition=available --timeout=300s deployment/argocd-server -n argocd
+
       - name: Update AWS Load Balancer Controller IAM Policy
         run: |
           # Update the IAM policy for the AWS Load Balancer Controller
@@ -24,7 +283,33 @@
           # Wait for the changes to take effect
           echo "Waiting for AWS CNI changes to take effect..."
           sleep 30
+
+      - name: Create namespace and ECR secret
+        run: |
+          # Create namespace
+          echo "Creating namespace: pethospital-dev"
+          kubectl create namespace pethospital-dev --dry-run=client -o yaml | kubectl apply -f -
+          kubectl label namespace pethospital-dev --overwrite argocd.argoproj.io/managed-by=argocd
           
+          # Create ECR registry secret - fixed format
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          ECR_TOKEN=$(aws ecr get-login-password --region ${AWS_REGION})
+          
+          # Create a proper Docker config JSON
+          DOCKER_CONFIG_JSON=$(echo -n "{\"auths\":{\"${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com\":{\"auth\":\"$(echo -n "AWS:${ECR_TOKEN}" | base64 -w 0)\"}}}" | base64 -w 0)
+          
+          # Create the secret with the proper format
+          cat <<EOF | kubectl apply -f -
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: ecr-registry-secret
+            namespace: pethospital-dev
+          type: kubernetes.io/dockerconfigjson
+          data:
+            .dockerconfigjson: ${DOCKER_CONFIG_JSON}
+          EOF
+
       - name: Deploy with ArgoCD
         run: |
           # Get ArgoCD admin password
@@ -95,3 +380,44 @@
           
           echo "Checking pod status after recreation..."
           kubectl get pods -n pethospital-dev
+
+      - name: Debug Pod Status
+        run: |
+          echo "Checking pod status in pethospital-dev namespace..."
+          kubectl get pods -n pethospital-dev
+          
+          echo "Checking pod details..."
+          for pod in $(kubectl get pods -n pethospital-dev -o jsonpath='{.items[*].metadata.name}'); do
+            echo "==== Details for pod: $pod ===="
+            kubectl describe pod $pod -n pethospital-dev
+          done
+          
+          echo "Checking pod logs..."
+          for pod in $(kubectl get pods -n pethospital-dev -o jsonpath='{.items[*].metadata.name}'); do
+            echo "==== Logs for pod: $pod ===="
+            kubectl logs $pod -n pethospital-dev --tail=50 || echo "Failed to get logs"
+          done
+          
+          echo "Checking events..."
+          kubectl get events -n pethospital-dev --sort-by='.lastTimestamp'
+          
+          echo "Checking ingress status..."
+          kubectl get ingress -n pethospital-dev -o wide
+          
+          echo "Checking services..."
+          kubectl get services -n pethospital-dev -o wide
+
+      - name: Output Application URL
+        run: |
+          echo "Application URL: ${{ needs.terraform.outputs.application_url }}"
+          echo "APPLICATION_URL=${{ needs.terraform.outputs.application_url }}" >> $GITHUB_ENV
+
+  notify:
+    name: Notify Deployment Status
+    needs: [deploy_to_eks, terraform]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deployment Success
+        run: |
+          echo "Deployment completed successfully!"
+          echo "Application URL: ${{ needs.terraform.outputs.application_url }}"
