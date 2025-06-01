@@ -1,0 +1,106 @@
+name: Grant ArgoCD Access
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_REGION: us-west-2
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  grant_access:
+    name: Grant ArgoCD Access
+    runs-on: ubuntu-latest
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update kubeconfig
+        run: |
+          # Get cluster name
+          CLUSTER_NAME=$(aws eks list-clusters --query "clusters[?contains(@, 'pet-hospital')]" --output text)
+          echo "Using cluster: $CLUSTER_NAME"
+          aws eks update-kubeconfig --name $CLUSTER_NAME --region ${{ env.AWS_REGION }}
+
+      - name: Update aws-auth ConfigMap
+        run: |
+          echo "Updating aws-auth ConfigMap to grant user access to the cluster..."
+          
+          # Get the current aws-auth ConfigMap
+          kubectl get configmap aws-auth -n kube-system -o yaml > aws-auth.yaml
+          
+          # Check if the user is already in the ConfigMap
+          if ! grep -q "arn:aws:sts::622037664315:assumed-role/admin/anandsjo-Isengard" aws-auth.yaml; then
+            # Add the user to the mapRoles section
+            if grep -q "mapRoles:" aws-auth.yaml; then
+              # mapRoles section exists, append to it
+              sed -i '/mapRoles:/a \    - rolearn: arn:aws:sts::622037664315:assumed-role/admin/anandsjo-Isengard\n      username: admin\n      groups:\n        - system:masters' aws-auth.yaml
+            else
+              # mapRoles section doesn't exist, create it
+              sed -i '/data:/a \  mapRoles: |\n    - rolearn: arn:aws:sts::622037664315:assumed-role/admin/anandsjo-Isengard\n      username: admin\n      groups:\n        - system:masters' aws-auth.yaml
+            fi
+            
+            # Apply the updated ConfigMap
+            kubectl apply -f aws-auth.yaml
+            echo "User added to aws-auth ConfigMap"
+          else
+            echo "User already exists in aws-auth ConfigMap"
+          fi
+
+      - name: Create ArgoCD Ingress
+        run: |
+          echo "Creating ArgoCD Ingress for external access..."
+          
+          # Create an Ingress resource for ArgoCD
+          cat > argocd-ingress.yaml << EOF
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: argocd-server-ingress
+            namespace: argocd
+            annotations:
+              kubernetes.io/ingress.class: alb
+              alb.ingress.kubernetes.io/scheme: internet-facing
+              alb.ingress.kubernetes.io/target-type: ip
+              alb.ingress.kubernetes.io/backend-protocol: HTTPS
+              alb.ingress.kubernetes.io/listen-ports: '[{"HTTPS":443}, {"HTTP":80}]'
+              alb.ingress.kubernetes.io/ssl-redirect: '443'
+          spec:
+            rules:
+              - http:
+                  paths:
+                    - path: /argocd
+                      pathType: Prefix
+                      backend:
+                        service:
+                          name: argocd-server
+                          port:
+                            number: 443
+          EOF
+          
+          # Apply the Ingress resource
+          kubectl apply -f argocd-ingress.yaml
+          
+          # Wait for the Ingress to be created
+          echo "Waiting for ArgoCD Ingress to be created..."
+          sleep 30
+          
+          # Get the Ingress URL
+          ARGOCD_URL=$(kubectl get ingress argocd-server-ingress -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+          
+          if [ -n "$ARGOCD_URL" ]; then
+            echo "ArgoCD is accessible at: http://${ARGOCD_URL}/argocd"
+            echo "ARGOCD_URL=http://${ARGOCD_URL}/argocd" >> $GITHUB_ENV
+            
+            # Get ArgoCD admin password
+            ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+            echo "ArgoCD admin password: $ARGOCD_PASSWORD"
+          else
+            echo "ArgoCD Ingress URL not available yet. Check the AWS Console for the ALB URL."
+          fi
