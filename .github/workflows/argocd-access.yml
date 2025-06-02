@@ -32,6 +32,14 @@ jobs:
 
       - name: Fix ArgoCD configuration
         run: |
+          # Delete any crashing pods first
+          CRASHING_PODS=$(kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-server --field-selector status.phase!=Running -o name)
+          if [ -n "$CRASHING_PODS" ]; then
+            echo "Found crashing ArgoCD server pods, deleting them:"
+            echo "$CRASHING_PODS"
+            echo "$CRASHING_PODS" | xargs kubectl delete -n argocd
+          fi
+          
           # Create required ConfigMaps
           cat > argocd-cm.yaml << 'EOF'
           apiVersion: v1
@@ -39,11 +47,18 @@ jobs:
           metadata:
             name: argocd-cm
             namespace: argocd
+            labels:
+              app.kubernetes.io/name: argocd-cm
+              app.kubernetes.io/part-of: argocd
           data:
             url: http://argocd-server
             application.instanceLabelKey: argocd.argoproj.io/instance
           EOF
           kubectl apply -f argocd-cm.yaml
+          
+          # Verify the ConfigMap was created
+          echo "Verifying argocd-cm ConfigMap:"
+          kubectl get configmap argocd-cm -n argocd
           
           # Configure ArgoCD server for HTTP access
           cat > argocd-cmd-params.yaml << 'EOF'
@@ -52,14 +67,33 @@ jobs:
           metadata:
             name: argocd-cmd-params-cm
             namespace: argocd
+            labels:
+              app.kubernetes.io/name: argocd-cmd-params-cm
+              app.kubernetes.io/part-of: argocd
           data:
             server.insecure: "true"
           EOF
           kubectl apply -f argocd-cmd-params.yaml
           
+          # Verify the ConfigMap was created
+          echo "Verifying argocd-cmd-params-cm ConfigMap:"
+          kubectl get configmap argocd-cmd-params-cm -n argocd
+          
           # Restart ArgoCD server
+          echo "Restarting ArgoCD server..."
           kubectl rollout restart deployment argocd-server -n argocd
+          
+          # Wait for the deployment to restart
+          echo "Waiting for ArgoCD server to restart..."
+          kubectl rollout status deployment argocd-server -n argocd --timeout=120s || true
+          
+          # Wait for pods to stabilize
+          echo "Waiting for pods to stabilize..."
           sleep 30
+          
+          # Check ArgoCD server status
+          echo "Current ArgoCD server pods:"
+          kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-server
 
       - name: Create LoadBalancer for ArgoCD
         run: |
@@ -86,6 +120,9 @@ jobs:
           LB_URL=$(kubectl get svc argocd-server-lb -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
           if [ -n "$LB_URL" ]; then
             echo "ArgoCD URL: http://${LB_URL}"
+            
+            # Update the argocd-cm with the LoadBalancer URL
+            kubectl patch configmap argocd-cm -n argocd --type=merge -p "{\"data\":{\"url\":\"http://${LB_URL}\"}}"
           fi
 
       - name: Create port-forward script
