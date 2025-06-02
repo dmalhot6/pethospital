@@ -628,8 +628,8 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           
-          # Stage all changes first
-          git add -A
+          # Only stage the k8s directory changes, not any other files
+          git add ./k8s/
           
           # Check if there are changes to commit
           if git diff --staged --quiet; then
@@ -647,9 +647,6 @@ jobs:
             # Push the changes
             git push
           fi
-          
-          # Apply the application manifest
-          kubectl apply -f argocd-application.yaml
           
           # Wait for application to be created
           echo "Waiting for application to be created..."
@@ -669,46 +666,42 @@ jobs:
           else
             echo "Creating ArgoCD application..."
             
-            # Create ArgoCD application manifest with explicit path
-            MANIFEST_PATH="$(pwd)/argocd-application.yaml"
+            # Create a temporary file for the ArgoCD application manifest
+            TEMP_FILE="/tmp/argocd-application.yaml"
             
             # Create the file
-            cat > "$MANIFEST_PATH" << EOF
-          apiVersion: argoproj.io/v1alpha1
-          kind: Application
-          metadata:
-            name: pethospital
-            namespace: argocd
-          spec:
-            project: default
-            source:
-              repoURL: https://github.com/${{ github.repository }}.git
-              targetRevision: main
-              path: k8s/overlays/${{ needs.setup_state_storage.outputs.environment }}
-            destination:
-              server: https://kubernetes.default.svc
-              namespace: pethospital-dev
-            syncPolicy:
-              automated:
-                prune: true
-                selfHeal: true
-              syncOptions:
-                - CreateNamespace=true
-                - Validate=true
-                - PrunePropagationPolicy=foreground
-                - PruneLast=true
-          EOF
+            cat > "${TEMP_FILE}" << 'EOF'
+            apiVersion: argoproj.io/v1alpha1
+            kind: Application
+            metadata:
+              name: pethospital
+              namespace: argocd
+            spec:
+              project: default
+              source:
+                repoURL: https://github.com/${{ github.repository }}.git
+                targetRevision: main
+                path: k8s/overlays/${{ needs.setup_state_storage.outputs.environment }}
+              destination:
+                server: https://kubernetes.default.svc
+                namespace: pethospital-dev
+              syncPolicy:
+                automated:
+                  prune: true
+                  selfHeal: true
+                syncOptions:
+                  - CreateNamespace=true
+                  - Validate=true
+                  - PrunePropagationPolicy=foreground
+                  - PruneLast=true
+            EOF
             
-            # Verify file exists
-            if [ -f "$MANIFEST_PATH" ]; then
-              echo "ArgoCD application manifest created successfully at $MANIFEST_PATH"
-              # Apply the manifest
-              kubectl apply -f "$MANIFEST_PATH"
-            else
-              echo "Error: Failed to create argocd-application.yaml at $MANIFEST_PATH"
-              ls -la $(pwd)
-              exit 1
-            fi
+            # Debug: Show the file contents and location
+            echo "File contents:"
+            cat "${TEMP_FILE}"
+            
+            # Apply the manifest directly from the temporary file
+            kubectl apply -f "${TEMP_FILE}"
           fi
           
           echo "ArgoCD will automatically sync the application with the updated manifests"
