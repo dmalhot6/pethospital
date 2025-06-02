@@ -30,7 +30,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: 622037664315.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-frontend:f077ce935695c7d2862d0272bed38525e51ae6f7
+          image: 622037664315.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-frontend:fc508e530402cdb0de8a0bcd3fc9508074067a8e
           ports:
             - containerPort: 80
           resources:
