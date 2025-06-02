@@ -1,6 +1,14 @@
 name: Deploy Infrastructure and Application
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - 'k8s/**'
+      - '.github/workflows/deploy.yml'
   workflow_dispatch:
     inputs:
       environment:
@@ -19,7 +27,7 @@ env:
 
 permissions:
   id-token: write
-  contents: read
+  contents: write
 
 jobs:
   setup_state_storage:
@@ -501,26 +509,30 @@ jobs:
 
       - name: Fix Kubernetes manifests
         run: |
-          echo "Fixing Kubernetes manifests to use proper ECR repository URLs..."
+          echo "Updating Kubernetes manifests with new image tags..."
           
           # Get AWS account ID
           AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           ECR_BASE_URL="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com"
           
-          # Update frontend.yaml to use the correct ECR URL
-          sed -i "s|\${ECR_REPOSITORY_URL}/frontend:latest|${ECR_BASE_URL}/${PROJECT_PREFIX}-frontend:latest|g" ./k8s/base/frontend.yaml
-          sed -i "s|image: .*dkr.ecr.*.amazonaws.com/pet-hospital-frontend:latest|image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-frontend:latest|g" ./k8s/base/frontend.yaml
+          # Use commit SHA for image tags
+          IMAGE_TAG="${GITHUB_SHA}"
+          echo "Using image tag: ${IMAGE_TAG}"
+          
+          # Update frontend.yaml to use the correct ECR URL and image tag
+          sed -i "s|\${ECR_REPOSITORY_URL}/frontend:latest|${ECR_BASE_URL}/${PROJECT_PREFIX}-frontend:${IMAGE_TAG}|g" ./k8s/base/frontend.yaml
+          sed -i "s|image: .*dkr.ecr.*.amazonaws.com/pet-hospital-frontend:.*|image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-frontend:${IMAGE_TAG}|g" ./k8s/base/frontend.yaml
           
           # Check if other service manifests exist and update them
           for service in pet-service hospital-service doctor-service; do
             if [ -f "./k8s/base/${service}.yaml" ]; then
               echo "Updating ${service}.yaml..."
-              sed -i "s|\${ECR_REPOSITORY_URL}/${service}:latest|${ECR_BASE_URL}/${PROJECT_PREFIX}-${service}:latest|g" ./k8s/base/${service}.yaml
-              sed -i "s|image: .*dkr.ecr.*.amazonaws.com/pet-hospital-${service}:latest|image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-${service}:latest|g" ./k8s/base/${service}.yaml
+              sed -i "s|\${ECR_REPOSITORY_URL}/${service}:latest|${ECR_BASE_URL}/${PROJECT_PREFIX}-${service}:${IMAGE_TAG}|g" ./k8s/base/${service}.yaml
+              sed -i "s|image: .*dkr.ecr.*.amazonaws.com/pet-hospital-${service}:.*|image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-${service}:${IMAGE_TAG}|g" ./k8s/base/${service}.yaml
             fi
           done
           
-          # Update deployment patches to include explicit image references
+          # Update deployment patches to include explicit image references with tags
           echo "Updating deployment patches..."
           cat > ./k8s/overlays/dev/patches/deployment-patches.yaml << EOF
           apiVersion: apps/v1
@@ -537,7 +549,7 @@ jobs:
                         value: "dev"
                       - name: AWS_REGION
                         value: "us-west-2"
-                    image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-pet-service:latest
+                    image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-pet-service:${IMAGE_TAG}
           ---
           apiVersion: apps/v1
           kind: Deployment
@@ -553,7 +565,7 @@ jobs:
                         value: "dev"
                       - name: AWS_REGION
                         value: "us-west-2"
-                    image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-hospital-service:latest
+                    image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-hospital-service:${IMAGE_TAG}
           ---
           apiVersion: apps/v1
           kind: Deployment
@@ -569,7 +581,7 @@ jobs:
                         value: "dev"
                       - name: AWS_REGION
                         value: "us-west-2"
-                    image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-doctor-service:latest
+                    image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-doctor-service:${IMAGE_TAG}
           ---
           apiVersion: apps/v1
           kind: Deployment
@@ -585,7 +597,7 @@ jobs:
                         value: "dev"
                       - name: API_URL
                         value: "http://frontend-ingress"
-                    image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-frontend:latest
+                    image: ${ECR_BASE_URL}/${PROJECT_PREFIX}-frontend:${IMAGE_TAG}
           EOF
           
           echo "Updated deployment patches:"
@@ -608,10 +620,45 @@ jobs:
           echo "Updated ECR secret:"
           cat ./k8s/overlays/dev/ecr-secret.yaml
 
-      - name: Deploy with ArgoCD
+      - name: Commit and push updated manifests
         run: |
-          # Create ArgoCD application manifest
-          cat > argocd-application.yaml << EOF
+          echo "Committing and pushing updated manifests with new image tags..."
+          
+          # Configure Git
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+          
+          # Add the changes
+          git add ./k8s/
+          
+          # Commit with a descriptive message
+          git commit -m "Update image tags to ${GITHUB_SHA} [skip ci]" || echo "No changes to commit"
+          
+          # Push the changes
+          git push
+          
+          # Apply the application manifest
+          kubectl apply -f argocd-application.yaml
+          
+          # Wait for application to be created
+          echo "Waiting for application to be created..."
+          sleep 10
+          
+          # Check application status
+          echo "Application status:"
+          kubectl get application pethospital -n argocd
+      - name: Verify ArgoCD Application
+        run: |
+          echo "Verifying ArgoCD application status..."
+          
+          # Check if ArgoCD application exists
+          if kubectl get application pethospital -n argocd &>/dev/null; then
+            echo "ArgoCD application exists, checking status..."
+            kubectl get application pethospital -n argocd -o yaml
+          else
+            echo "Creating ArgoCD application..."
+            # Create ArgoCD application manifest
+            cat > argocd-application.yaml << EOF
           apiVersion: argoproj.io/v1alpha1
           kind: Application
           metadata:
@@ -621,7 +668,7 @@ jobs:
             project: default
             source:
               repoURL: https://github.com/${{ github.repository }}.git
-              targetRevision: $GITHUB_SHA
+              targetRevision: main
               path: k8s/overlays/${{ needs.setup_state_storage.outputs.environment }}
             destination:
               server: https://kubernetes.default.svc
@@ -636,27 +683,10 @@ jobs:
                 - PrunePropagationPolicy=foreground
                 - PruneLast=true
           EOF
+            kubectl apply -f argocd-application.yaml
+          fi
           
-          # Apply the application manifest
-          kubectl apply -f argocd-application.yaml
-          
-          # Wait for application to be created
-          echo "Waiting for application to be created..."
-          sleep 10
-          
-          # Check application status
-          echo "Application status:"
-          kubectl get application pethospital -n argocd
-      - name: Delete and recreate pods
-        run: |
-          echo "Deleting all pods in pethospital-dev namespace to force recreation with correct image names..."
-          kubectl delete pods --all -n pethospital-dev
-          
-          echo "Waiting for pods to be recreated..."
-          sleep 30
-          
-          echo "Checking pod status after recreation..."
-          kubectl get pods -n pethospital-dev
+          echo "ArgoCD will automatically sync the application with the updated manifests"
 
       - name: Debug Pod Status
         run: |
@@ -667,12 +697,6 @@ jobs:
           for pod in $(kubectl get pods -n pethospital-dev -o jsonpath='{.items[*].metadata.name}'); do
             echo "==== Details for pod: $pod ===="
             kubectl describe pod $pod -n pethospital-dev
-          done
-          
-          echo "Checking pod logs..."
-          for pod in $(kubectl get pods -n pethospital-dev -o jsonpath='{.items[*].metadata.name}'); do
-            echo "==== Logs for pod: $pod ===="
-            kubectl logs $pod -n pethospital-dev --tail=50 || echo "Failed to get logs"
           done
           
           echo "Checking events..."
