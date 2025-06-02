@@ -33,28 +33,28 @@ jobs:
       - name: Fix ArgoCD configuration
         run: |
           # Create required ConfigMaps
-          cat <<'EOF' > argocd-cm.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: argocd-cm
-  namespace: argocd
-data:
-  url: http://argocd-server
-  application.instanceLabelKey: argocd.argoproj.io/instance
-EOF
+          cat > argocd-cm.yaml << 'EOF'
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: argocd-cm
+            namespace: argocd
+          data:
+            url: http://argocd-server
+            application.instanceLabelKey: argocd.argoproj.io/instance
+          EOF
           kubectl apply -f argocd-cm.yaml
           
           # Configure ArgoCD server for HTTP access
-          cat <<'EOF' > argocd-cmd-params.yaml
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: argocd-cmd-params-cm
-  namespace: argocd
-data:
-  server.insecure: "true"
-EOF
+          cat > argocd-cmd-params.yaml << 'EOF'
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: argocd-cmd-params-cm
+            namespace: argocd
+          data:
+            server.insecure: "true"
+          EOF
           kubectl apply -f argocd-cmd-params.yaml
           
           # Restart ArgoCD server
@@ -63,22 +63,22 @@ EOF
 
       - name: Create LoadBalancer for ArgoCD
         run: |
-          cat <<'EOF' > argocd-lb.yaml
-apiVersion: v1
-kind: Service
-metadata:
-  name: argocd-server-lb
-  namespace: argocd
-  annotations:
-    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
-spec:
-  ports:
-  - port: 80
-    targetPort: 8080
-  selector:
-    app.kubernetes.io/name: argocd-server
-  type: LoadBalancer
-EOF
+          cat > argocd-lb.yaml << 'EOF'
+          apiVersion: v1
+          kind: Service
+          metadata:
+            name: argocd-server-lb
+            namespace: argocd
+            annotations:
+              service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+          spec:
+            ports:
+            - port: 80
+              targetPort: 8080
+            selector:
+              app.kubernetes.io/name: argocd-server
+            type: LoadBalancer
+          EOF
           kubectl apply -f argocd-lb.yaml
           sleep 60
           
@@ -90,13 +90,13 @@ EOF
 
       - name: Create port-forward script
         run: |
-          cat <<'EOF' > argocd-port-forward.sh
-#!/bin/bash
-aws eks update-kubeconfig --name pet-hospital-eks-cluster --region us-west-2
-PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
-echo "ArgoCD credentials: admin / $PASSWORD"
-kubectl port-forward svc/argocd-server -n argocd 8080:80
-EOF
+          cat > argocd-port-forward.sh << 'EOF'
+          #!/bin/bash
+          aws eks update-kubeconfig --name pet-hospital-eks-cluster --region us-west-2
+          PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+          echo "ArgoCD credentials: admin / $PASSWORD"
+          kubectl port-forward svc/argocd-server -n argocd 8080:80
+          EOF
           chmod +x argocd-port-forward.sh
 
       - name: Display access information
