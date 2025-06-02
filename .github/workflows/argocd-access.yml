@@ -23,253 +23,93 @@ jobs:
 
       - name: Update kubeconfig
         run: |
-          # Get cluster name
           CLUSTER_NAME=$(aws eks list-clusters --query "clusters[?contains(@, 'pet-hospital')]" --output text)
-          echo "Using cluster: $CLUSTER_NAME"
           aws eks update-kubeconfig --name $CLUSTER_NAME --region ${{ env.AWS_REGION }}
 
-      - name: Update aws-auth ConfigMap
+      - name: Add user to aws-auth ConfigMap
         run: |
-          echo "Updating aws-auth ConfigMap to grant user access to the cluster..."
-          
-          # Get the current aws-auth ConfigMap
-          kubectl get configmap aws-auth -n kube-system -o yaml > aws-auth.yaml
-          
-          # Check if the user is already in the ConfigMap
-          if ! grep -q "arn:aws:sts::622037664315:assumed-role/admin/anandsjo-Isengard" aws-auth.yaml; then
-            # Add the user to the mapRoles section
-            if grep -q "mapRoles:" aws-auth.yaml; then
-              # mapRoles section exists, append to it
-              sed -i '/mapRoles:/a \    - rolearn: arn:aws:sts::622037664315:assumed-role/admin/anandsjo-Isengard\n      username: admin\n      groups:\n        - system:masters' aws-auth.yaml
-            else
-              # mapRoles section doesn't exist, create it
-              sed -i '/data:/a \  mapRoles: |\n    - rolearn: arn:aws:sts::622037664315:assumed-role/admin/anandsjo-Isengard\n      username: admin\n      groups:\n        - system:masters' aws-auth.yaml
-            fi
-            
-            # Apply the updated ConfigMap
-            kubectl apply -f aws-auth.yaml
-            echo "User added to aws-auth ConfigMap"
-          else
-            echo "User already exists in aws-auth ConfigMap"
-          fi
+          kubectl patch configmap aws-auth -n kube-system --type=merge -p '{"data":{"mapRoles":"- rolearn: arn:aws:sts::622037664315:assumed-role/admin/anandsjo-Isengard\n  username: admin\n  groups:\n    - system:masters\n"}}'
 
-      - name: Fix ArgoCD Configuration
+      - name: Fix ArgoCD configuration
         run: |
-          echo "Fixing ArgoCD configuration..."
+          # Create required ConfigMaps
+          cat <<'EOF' > argocd-cm.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cm
+  namespace: argocd
+data:
+  url: http://argocd-server
+  application.instanceLabelKey: argocd.argoproj.io/instance
+EOF
+          kubectl apply -f argocd-cm.yaml
           
-          # Delete the crashing pod first to avoid race conditions
-          CRASHING_PODS=$(kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-server --field-selector status.phase!=Running -o name)
-          if [ -n "$CRASHING_PODS" ]; then
-            echo "Found crashing ArgoCD server pods, deleting them:"
-            echo "$CRASHING_PODS"
-            echo "$CRASHING_PODS" | xargs kubectl delete -n argocd
-          fi
+          # Configure ArgoCD server for HTTP access
+          cat <<'EOF' > argocd-cmd-params.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: argocd-cmd-params-cm
+  namespace: argocd
+data:
+  server.insecure: "true"
+EOF
+          kubectl apply -f argocd-cmd-params.yaml
           
-          # Check if argocd-cm exists
-          if kubectl get configmap argocd-cm -n argocd &>/dev/null; then
-            echo "argocd-cm ConfigMap exists, backing it up and updating it"
-            kubectl get configmap argocd-cm -n argocd -o yaml > argocd-cm-backup.yaml
-            
-            # Update the existing ConfigMap
-            kubectl patch configmap argocd-cm -n argocd --type=merge -p '{"data":{"url":"http://argocd-server.argocd.svc.cluster.local","application.instanceLabelKey":"argocd.argoproj.io/instance"}}'
-          else
-            echo "argocd-cm ConfigMap does not exist, creating it"
-            # Create the ConfigMap
-            cat > argocd-cm.yaml << EOF
-            apiVersion: v1
-            kind: ConfigMap
-            metadata:
-              name: argocd-cm
-              namespace: argocd
-              labels:
-                app.kubernetes.io/name: argocd-cm
-                app.kubernetes.io/part-of: argocd
-            data:
-              url: "http://argocd-server.argocd.svc.cluster.local"
-              application.instanceLabelKey: "argocd.argoproj.io/instance"
-            EOF
-            
-            kubectl apply -f argocd-cm.yaml
-          fi
-          
-          # Wait for the ConfigMap to be properly created
-          echo "Waiting for ConfigMap to be properly created..."
-          sleep 5
-          
-          # Verify the ConfigMap was created correctly
-          kubectl get configmap argocd-cm -n argocd -o yaml
-          
-          # Restart the ArgoCD server deployment to pick up the new ConfigMap
-          echo "Restarting ArgoCD server deployment..."
+          # Restart ArgoCD server
           kubectl rollout restart deployment argocd-server -n argocd
-          
-          # Wait for the deployment to restart
-          echo "Waiting for ArgoCD server deployment to restart..."
-          kubectl rollout status deployment argocd-server -n argocd --timeout=60s || true
-          
-          # Wait for pods to stabilize
-          echo "Waiting for pods to stabilize..."
           sleep 30
-          
-          # Check ArgoCD server status
-          echo "Current ArgoCD server pods:"
-          kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-server
-          
-          # Check logs of running pods
-          echo "Checking logs of ArgoCD server pods:"
-          for pod in $(kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-server --field-selector status.phase=Running -o name); do
-            echo "=== Logs for $pod ==="
-            kubectl logs $pod -n argocd --tail=20 || echo "Failed to get logs"
-          done
 
-      - name: Create Direct LoadBalancer Service
+      - name: Create LoadBalancer for ArgoCD
         run: |
-          echo "Creating a direct LoadBalancer service for ArgoCD..."
-          
-          # Delete existing service if it exists
-          kubectl delete service argocd-server-lb -n argocd --ignore-not-found
-          
-          # Create a LoadBalancer service with multiple ports
-          cat > argocd-lb-service.yaml << EOF
-          apiVersion: v1
-          kind: Service
-          metadata:
-            name: argocd-server-lb
-            namespace: argocd
-            annotations:
-              service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "http"
-              service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "https"
-          spec:
-            ports:
-            - name: http
-              port: 80
-              protocol: TCP
-              targetPort: 8080
-            - name: https
-              port: 443
-              protocol: TCP
-              targetPort: 8080
-            selector:
-              app.kubernetes.io/name: argocd-server
-            type: LoadBalancer
-          EOF
-          
-          # Apply the service
-          kubectl apply -f argocd-lb-service.yaml
-          
-          # Wait for the service to get an external IP
-          echo "Waiting for LoadBalancer service to get an external IP..."
+          cat <<'EOF' > argocd-lb.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: argocd-server-lb
+  namespace: argocd
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  ports:
+  - port: 80
+    targetPort: 8080
+  selector:
+    app.kubernetes.io/name: argocd-server
+  type: LoadBalancer
+EOF
+          kubectl apply -f argocd-lb.yaml
           sleep 60
           
-          # Get the LoadBalancer URL
+          # Get LoadBalancer URL
           LB_URL=$(kubectl get svc argocd-server-lb -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          
           if [ -n "$LB_URL" ]; then
-            echo "ArgoCD is accessible directly at: http://${LB_URL}"
-            echo "ARGOCD_LB_URL=http://${LB_URL}" >> $GITHUB_ENV
-            
-            # Update the argocd-cm with the LoadBalancer URL
-            kubectl patch configmap argocd-cm -n argocd --type=merge -p "{\"data\":{\"url\":\"http://${LB_URL}\"}}"
-            
-            # Get ArgoCD admin password
-            ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
-            echo "ArgoCD admin password: $ARGOCD_PASSWORD"
-          else
-            echo "Direct LoadBalancer URL not available yet."
+            echo "ArgoCD URL: http://${LB_URL}"
           fi
 
-      - name: Configure Security Groups
+      - name: Create port-forward script
         run: |
-          echo "Configuring security groups for worker nodes..."
-          
-          # Get the cluster name
-          CLUSTER_NAME=$(aws eks list-clusters --query "clusters[?contains(@, 'pet-hospital')]" --output text)
-          
-          # Get the security group IDs for the worker nodes
-          NODE_SECURITY_GROUPS=$(aws ec2 describe-instances --filters "Name=tag:kubernetes.io/cluster/$CLUSTER_NAME,Values=owned" --query "Reservations[*].Instances[*].SecurityGroups[*].GroupId" --output text)
-          
-          echo "Node security groups: $NODE_SECURITY_GROUPS"
-          
-          # For each security group, ensure it allows traffic on ports 8080 and 443
-          for SG_ID in $NODE_SECURITY_GROUPS; do
-            echo "Updating security group $SG_ID to allow traffic on ports 8080 and 443..."
-            
-            # Allow inbound traffic on port 8080 from anywhere
-            aws ec2 authorize-security-group-ingress \
-              --group-id $SG_ID \
-              --protocol tcp \
-              --port 8080 \
-              --cidr 0.0.0.0/0 || echo "Inbound rule for port 8080 already exists"
-            
-            # Allow inbound traffic on port 443 from anywhere
-            aws ec2 authorize-security-group-ingress \
-              --group-id $SG_ID \
-              --protocol tcp \
-              --port 443 \
-              --cidr 0.0.0.0/0 || echo "Inbound rule for port 443 already exists"
-          done
-
-      - name: Create Port-Forward Script
-        run: |
-          echo "Creating a port-forward script for local access..."
-          
-          cat > argocd-port-forward.sh << 'EOF'
-          #!/bin/bash
-          
-          # Update kubeconfig
-          aws eks update-kubeconfig --name pet-hospital-eks-cluster --region us-west-2
-          
-          # Port-forward ArgoCD server
-          echo "Starting port-forward to ArgoCD server..."
-          echo "Access ArgoCD at: https://localhost:8080"
-          echo "Username: admin"
-          echo "Password: $(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)"
-          
-          kubectl port-forward svc/argocd-server -n argocd 8080:443
-          EOF
-          
+          cat <<'EOF' > argocd-port-forward.sh
+#!/bin/bash
+aws eks update-kubeconfig --name pet-hospital-eks-cluster --region us-west-2
+PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+echo "ArgoCD credentials: admin / $PASSWORD"
+kubectl port-forward svc/argocd-server -n argocd 8080:80
+EOF
           chmod +x argocd-port-forward.sh
-          echo "Created port-forward script: argocd-port-forward.sh"
-          echo "You can use this script locally to access ArgoCD via port-forwarding"
 
-      - name: Debug ArgoCD Setup
+      - name: Display access information
         run: |
-          echo "Debugging ArgoCD setup..."
+          echo "===== ArgoCD Access Information ====="
+          PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+          echo "Username: admin"
+          echo "Password: $PASSWORD"
           
-          # Check ArgoCD pods
-          echo "ArgoCD pods:"
-          kubectl get pods -n argocd
-          
-          # Check ArgoCD services
-          echo "ArgoCD services:"
-          kubectl get svc -n argocd
-          
-          # Check direct LoadBalancer service
-          echo "Direct LoadBalancer service details:"
-          kubectl get svc argocd-server-lb -n argocd -o yaml
-          
-          # Check ArgoCD ConfigMaps
-          echo "ArgoCD ConfigMaps:"
-          kubectl get configmap -n argocd
-          
-          # Get ArgoCD admin password
-          ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
-          echo "ArgoCD admin password: $ARGOCD_PASSWORD"
-          
-          # Get the LoadBalancer URL
           LB_URL=$(kubectl get svc argocd-server-lb -n argocd -o jsonpath='{.status.loadBalancer.ingress[0].hostname}')
-          
           if [ -n "$LB_URL" ]; then
-            echo "ArgoCD is accessible directly at: http://${LB_URL} and https://${LB_URL}"
-            echo "ARGOCD_LB_URL=http://${LB_URL}" >> $GITHUB_ENV
-            
-            # Test connectivity to the LoadBalancer
-            echo "Testing connectivity to LoadBalancer (this may fail in GitHub Actions)..."
-            curl -k --connect-timeout 5 https://${LB_URL} || echo "HTTPS connection test failed or timed out"
-            curl --connect-timeout 5 http://${LB_URL} || echo "HTTP connection test failed or timed out"
-          else
-            echo "Direct LoadBalancer URL not available yet."
+            echo "LoadBalancer URL: http://${LB_URL}"
           fi
           
-          echo "Access ArgoCD using username: admin and the password shown above."
-          echo "You can also use port-forwarding with the provided script."
+          echo "Local access: Run ./argocd-port-forward.sh"
+          echo "====================================="
