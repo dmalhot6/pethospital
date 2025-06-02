@@ -53,11 +53,29 @@ jobs:
             echo "User already exists in aws-auth ConfigMap"
           fi
 
-      - name: Fix ArgoCD Server
+      - name: Fix ArgoCD Configuration
         run: |
-          echo "Fixing ArgoCD server issues..."
+          echo "Fixing ArgoCD configuration..."
           
-          # Check for crashing pods
+          # Create the missing argocd-cm ConfigMap
+          cat > argocd-cm.yaml << EOF
+          apiVersion: v1
+          kind: ConfigMap
+          metadata:
+            name: argocd-cm
+            namespace: argocd
+            labels:
+              app.kubernetes.io/name: argocd-cm
+              app.kubernetes.io/part-of: argocd
+          data:
+            url: http://argocd-server.argocd.svc.cluster.local
+            application.instanceLabelKey: argocd.argoproj.io/instance
+          EOF
+          
+          # Apply the ConfigMap
+          kubectl apply -f argocd-cm.yaml
+          
+          # Delete the crashing pod to force recreation
           CRASHING_PODS=$(kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-server --field-selector status.phase!=Running -o name)
           
           if [ -n "$CRASHING_PODS" ]; then
@@ -125,6 +143,9 @@ jobs:
           if [ -n "$LB_URL" ]; then
             echo "ArgoCD is accessible directly at: http://${LB_URL}"
             echo "ARGOCD_LB_URL=http://${LB_URL}" >> $GITHUB_ENV
+            
+            # Update the argocd-cm with the LoadBalancer URL
+            kubectl patch configmap argocd-cm -n argocd --type=merge -p "{\"data\":{\"url\":\"http://${LB_URL}\"}}"
             
             # Get ArgoCD admin password
             ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
@@ -202,6 +223,10 @@ jobs:
           # Check direct LoadBalancer service
           echo "Direct LoadBalancer service details:"
           kubectl get svc argocd-server-lb -n argocd -o yaml
+          
+          # Check ArgoCD ConfigMaps
+          echo "ArgoCD ConfigMaps:"
+          kubectl get configmap -n argocd
           
           # Get ArgoCD admin password
           ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
