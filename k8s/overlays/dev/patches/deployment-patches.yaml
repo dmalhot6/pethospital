@@ -12,7 +12,7 @@ spec:
               value: "dev"
             - name: AWS_REGION
               value: "us-west-2"
-          image: 622037664315.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-pet-service:fc508e530402cdb0de8a0bcd3fc9508074067a8e
+          image: 622037664315.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-pet-service:54ac5e4ad70a76e98e79c39226eb05eb931c7014
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -28,7 +28,7 @@ spec:
               value: "dev"
             - name: AWS_REGION
               value: "us-west-2"
-          image: 622037664315.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-hospital-service:fc508e530402cdb0de8a0bcd3fc9508074067a8e
+          image: 622037664315.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-hospital-service:54ac5e4ad70a76e98e79c39226eb05eb931c7014
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -44,7 +44,7 @@ spec:
               value: "dev"
             - name: AWS_REGION
               value: "us-west-2"
-          image: 622037664315.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-doctor-service:fc508e530402cdb0de8a0bcd3fc9508074067a8e
+          image: 622037664315.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-doctor-service:54ac5e4ad70a76e98e79c39226eb05eb931c7014
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -60,4 +60,4 @@ spec:
               value: "dev"
             - name: API_URL
               value: "http://frontend-ingress"
-          image: 622037664315.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-frontend:fc508e530402cdb0de8a0bcd3fc9508074067a8e
+          image: 622037664315.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-frontend:54ac5e4ad70a76e98e79c39226eb05eb931c7014
