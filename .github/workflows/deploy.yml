@@ -670,7 +670,7 @@ jobs:
             TEMP_FILE="/tmp/argocd-application.yaml"
             
             # Create the file
-            cat > "${TEMP_FILE}" << 'EOF'
+            cat > "${TEMP_FILE}" << EOF
             apiVersion: argoproj.io/v1alpha1
             kind: Application
             metadata:
