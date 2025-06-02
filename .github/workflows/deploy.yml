@@ -628,6 +628,9 @@ jobs:
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
           
+          # Pull the latest changes from the remote repository
+          git pull --rebase origin main
+          
           # Add the changes
           git add ./k8s/
           
@@ -683,6 +686,7 @@ jobs:
                 - PrunePropagationPolicy=foreground
                 - PruneLast=true
           EOF
+            # Apply the manifest
             kubectl apply -f argocd-application.yaml
           fi
           
