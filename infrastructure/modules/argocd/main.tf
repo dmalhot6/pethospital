@@ -35,7 +35,7 @@ resource "null_resource" "install_argocd" {
         project: default
         source:
           repoURL: ${var.git_repository_url}
-          targetRevision: HEAD
+          targetRevision: main
           path: k8s/overlays/${var.environment}
         destination:
           server: https://kubernetes.default.svc
