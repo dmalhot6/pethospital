@@ -610,64 +610,43 @@ jobs:
 
       - name: Deploy with ArgoCD
         run: |
-          # Get ArgoCD admin password
-          ARGOCD_PASSWORD=$(kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d)
+          # Create ArgoCD application manifest
+          cat > argocd-application.yaml << EOF
+          apiVersion: argoproj.io/v1alpha1
+          kind: Application
+          metadata:
+            name: pethospital
+            namespace: argocd
+          spec:
+            project: default
+            source:
+              repoURL: https://github.com/${{ github.repository }}.git
+              targetRevision: $GITHUB_SHA
+              path: k8s/overlays/${{ needs.setup_state_storage.outputs.environment }}
+            destination:
+              server: https://kubernetes.default.svc
+              namespace: pethospital-dev
+            syncPolicy:
+              automated:
+                prune: true
+                selfHeal: true
+              syncOptions:
+                - CreateNamespace=true
+                - Validate=true
+                - PrunePropagationPolicy=foreground
+                - PruneLast=true
+          EOF
           
-          # Port forward ArgoCD server (in background)
-          kubectl port-forward svc/argocd-server -n argocd 8080:443 &
-          PF_PID=$!
-          echo "Port forwarding process ID: $PF_PID"
+          # Apply the application manifest
+          kubectl apply -f argocd-application.yaml
+          
+          # Wait for application to be created
+          echo "Waiting for application to be created..."
           sleep 10
           
-          # Login to ArgoCD
-          argocd login localhost:8080 --username admin --password $ARGOCD_PASSWORD --insecure
-          
-          # Create/update ArgoCD application
-          # Use pethospital-dev namespace to match what's in the k8s manifests
-          NAMESPACE="pethospital-dev"
-          echo "Using namespace: $NAMESPACE"
-          
-          # Get AWS account ID and region for image substitution
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-          
-          # Delete the application if it exists to avoid immutable field errors
-          argocd app delete pethospital --cascade=false || true
-          sleep 5
-          
-          # Create a new application
-          argocd app create pethospital \
-            --repo https://github.com/${{ github.repository }}.git \
-            --path k8s/overlays/${{ needs.setup_state_storage.outputs.environment }} \
-            --dest-server https://kubernetes.default.svc \
-            --dest-namespace $NAMESPACE \
-            --sync-policy automated \
-            --auto-prune \
-            --self-heal \
-            --revision $GITHUB_SHA
-          
-          # Wait for application to be created/updated before syncing
-          echo "Waiting for application to be ready before syncing..."
-          sleep 10
-          
-          # Check if application exists and is not already syncing
-          APP_STATUS=$(argocd app get pethospital -o json | jq -r '.status.sync.status')
-          echo "Current application status: $APP_STATUS"
-          
-          # Sync application with timeout and error handling
-          if [ "$APP_STATUS" != "Syncing" ]; then
-            echo "Syncing application..."
-            argocd app sync pethospital --timeout 180 || echo "Sync command failed, but continuing as app may sync automatically"
-          else
-            echo "Application is already syncing, skipping manual sync"
-          fi
-          
-          # Wait for sync to complete
-          echo "Waiting for sync to complete..."
-          argocd app wait pethospital --timeout 300 || echo "Wait timed out, but continuing as app may still be syncing"
-          
-          # Kill the port-forwarding process
-          kill $PF_PID || true
-          
+          # Check application status
+          echo "Application status:"
+          kubectl get application pethospital -n argocd
       - name: Delete and recreate pods
         run: |
           echo "Deleting all pods in pethospital-dev namespace to force recreation with correct image names..."
