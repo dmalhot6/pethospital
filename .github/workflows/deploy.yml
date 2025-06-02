@@ -668,8 +668,12 @@ jobs:
             kubectl get application pethospital -n argocd -o yaml
           else
             echo "Creating ArgoCD application..."
-            # Create ArgoCD application manifest
-            cat > argocd-application.yaml << EOF
+            
+            # Create ArgoCD application manifest with explicit path
+            MANIFEST_PATH="$(pwd)/argocd-application.yaml"
+            
+            # Create the file
+            cat > "$MANIFEST_PATH" << EOF
           apiVersion: argoproj.io/v1alpha1
           kind: Application
           metadata:
@@ -694,8 +698,17 @@ jobs:
                 - PrunePropagationPolicy=foreground
                 - PruneLast=true
           EOF
-            # Apply the manifest
-            kubectl apply -f argocd-application.yaml
+            
+            # Verify file exists
+            if [ -f "$MANIFEST_PATH" ]; then
+              echo "ArgoCD application manifest created successfully at $MANIFEST_PATH"
+              # Apply the manifest
+              kubectl apply -f "$MANIFEST_PATH"
+            else
+              echo "Error: Failed to create argocd-application.yaml at $MANIFEST_PATH"
+              ls -la $(pwd)
+              exit 1
+            fi
           fi
           
           echo "ArgoCD will automatically sync the application with the updated manifests"
