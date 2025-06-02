@@ -623,87 +623,69 @@ jobs:
       - name: Commit and push updated manifests
         run: |
           echo "Committing and pushing updated manifests with new image tags..."
-          
+
           # Configure Git
           git config --global user.name "GitHub Actions"
           git config --global user.email "actions@github.com"
-          
-          # Only stage the k8s directory changes, not any other files
+
+          # Only stage the k8s directory changes
           git add ./k8s/
-          
+
           # Check if there are changes to commit
-          if git diff --staged --quiet; then
-            echo "No changes to commit"
-          else
+          if ! git diff --staged --quiet; then
             # Commit changes
             git commit -m "Update image tags to ${GITHUB_SHA} [skip ci]"
-            
-            # Fetch latest changes
-            git fetch origin main
-            
-            # Merge instead of rebase to avoid issues with unstaged changes
-            git merge -X theirs origin/main
-            
+
+            # Pull with rebase to integrate any remote changes
+            git pull --rebase origin main || git reset --hard origin/main
+
             # Push the changes
-            git push
+            git push origin main
+          else
+            echo "No changes to commit"
           fi
-          
-          # Wait for application to be created
-          echo "Waiting for application to be created..."
-          sleep 10
-          
-          # Check application status
-          echo "Application status:"
-          kubectl get application pethospital -n argocd
+
       - name: Verify ArgoCD Application
         run: |
           echo "Verifying ArgoCD application status..."
-          
+
           # Check if ArgoCD application exists
           if kubectl get application pethospital -n argocd &>/dev/null; then
             echo "ArgoCD application exists, checking status..."
             kubectl get application pethospital -n argocd -o yaml
           else
             echo "Creating ArgoCD application..."
-            
-            # Create a temporary file for the ArgoCD application manifest
-            TEMP_FILE="/tmp/argocd-application.yaml"
-            
-            # Create the file
-            cat > "${TEMP_FILE}" << EOF
-            apiVersion: argoproj.io/v1alpha1
-            kind: Application
-            metadata:
-              name: pethospital
-              namespace: argocd
-            spec:
-              project: default
-              source:
-                repoURL: https://github.com/${{ github.repository }}.git
-                targetRevision: main
-                path: k8s/overlays/${{ needs.setup_state_storage.outputs.environment }}
-              destination:
-                server: https://kubernetes.default.svc
-                namespace: pethospital-dev
-              syncPolicy:
-                automated:
-                  prune: true
-                  selfHeal: true
-                syncOptions:
-                  - CreateNamespace=true
-                  - Validate=true
-                  - PrunePropagationPolicy=foreground
-                  - PruneLast=true
-            EOF
-            
-            # Debug: Show the file contents and location
-            echo "File contents:"
-            cat "${TEMP_FILE}"
-            
-            # Apply the manifest directly from the temporary file
-            kubectl apply -f "${TEMP_FILE}"
+
+            # Create a YAML file for the application
+            echo "apiVersion: argoproj.io/v1alpha1" > argocd-app.yaml
+            echo "kind: Application" >> argocd-app.yaml
+            echo "metadata:" >> argocd-app.yaml
+            echo "  name: pethospital" >> argocd-app.yaml
+            echo "  namespace: argocd" >> argocd-app.yaml
+            echo "spec:" >> argocd-app.yaml
+            echo "  project: default" >> argocd-app.yaml
+            echo "  source:" >> argocd-app.yaml
+            echo "    repoURL: https://github.com/${{ github.repository }}.git" >> argocd-app.yaml
+            echo "    targetRevision: main" >> argocd-app.yaml
+            echo "    path: k8s/overlays/${{ needs.setup_state_storage.outputs.environment }}" >> argocd-app.yaml
+            echo "  destination:" >> argocd-app.yaml
+            echo "    server: https://kubernetes.default.svc" >> argocd-app.yaml
+            echo "    namespace: pethospital-dev" >> argocd-app.yaml
+            echo "  syncPolicy:" >> argocd-app.yaml
+            echo "    automated:" >> argocd-app.yaml
+            echo "      prune: true" >> argocd-app.yaml
+            echo "      selfHeal: true" >> argocd-app.yaml
+            echo "      allowEmpty: false" >> argocd-app.yaml
+            echo "    syncOptions:" >> argocd-app.yaml
+            echo "    - CreateNamespace=true" >> argocd-app.yaml
+            echo "    - Validate=true" >> argocd-app.yaml
+            echo "    - PrunePropagationPolicy=foreground" >> argocd-app.yaml
+            echo "    - PruneLast=true" >> argocd-app.yaml
+
+            # Apply the manifest
+            kubectl apply -f argocd-app.yaml
           fi
-          
+
           echo "ArgoCD will automatically sync the application with the updated manifests"
 
       - name: Debug Pod Status
