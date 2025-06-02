@@ -57,38 +57,59 @@ jobs:
         run: |
           echo "Fixing ArgoCD configuration..."
           
-          # Create the missing argocd-cm ConfigMap
-          cat > argocd-cm.yaml << EOF
-          apiVersion: v1
-          kind: ConfigMap
-          metadata:
-            name: argocd-cm
-            namespace: argocd
-            labels:
-              app.kubernetes.io/name: argocd-cm
-              app.kubernetes.io/part-of: argocd
-          data:
-            url: http://argocd-server.argocd.svc.cluster.local
-            application.instanceLabelKey: argocd.argoproj.io/instance
-          EOF
-          
-          # Apply the ConfigMap
-          kubectl apply -f argocd-cm.yaml
-          
-          # Delete the crashing pod to force recreation
+          # Delete the crashing pod first to avoid race conditions
           CRASHING_PODS=$(kubectl get pods -n argocd -l app.kubernetes.io/name=argocd-server --field-selector status.phase!=Running -o name)
-          
           if [ -n "$CRASHING_PODS" ]; then
             echo "Found crashing ArgoCD server pods, deleting them:"
             echo "$CRASHING_PODS"
-            
-            # Delete crashing pods
             echo "$CRASHING_PODS" | xargs kubectl delete -n argocd
-            
-            # Wait for new pods to be created
-            echo "Waiting for ArgoCD server pods to stabilize..."
-            sleep 30
           fi
+          
+          # Check if argocd-cm exists
+          if kubectl get configmap argocd-cm -n argocd &>/dev/null; then
+            echo "argocd-cm ConfigMap exists, backing it up and updating it"
+            kubectl get configmap argocd-cm -n argocd -o yaml > argocd-cm-backup.yaml
+            
+            # Update the existing ConfigMap
+            kubectl patch configmap argocd-cm -n argocd --type=merge -p '{"data":{"url":"http://argocd-server.argocd.svc.cluster.local","application.instanceLabelKey":"argocd.argoproj.io/instance"}}'
+          else
+            echo "argocd-cm ConfigMap does not exist, creating it"
+            # Create the ConfigMap
+            cat > argocd-cm.yaml << EOF
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: argocd-cm
+              namespace: argocd
+              labels:
+                app.kubernetes.io/name: argocd-cm
+                app.kubernetes.io/part-of: argocd
+            data:
+              url: "http://argocd-server.argocd.svc.cluster.local"
+              application.instanceLabelKey: "argocd.argoproj.io/instance"
+            EOF
+            
+            kubectl apply -f argocd-cm.yaml
+          fi
+          
+          # Wait for the ConfigMap to be properly created
+          echo "Waiting for ConfigMap to be properly created..."
+          sleep 5
+          
+          # Verify the ConfigMap was created correctly
+          kubectl get configmap argocd-cm -n argocd -o yaml
+          
+          # Restart the ArgoCD server deployment to pick up the new ConfigMap
+          echo "Restarting ArgoCD server deployment..."
+          kubectl rollout restart deployment argocd-server -n argocd
+          
+          # Wait for the deployment to restart
+          echo "Waiting for ArgoCD server deployment to restart..."
+          kubectl rollout status deployment argocd-server -n argocd --timeout=60s || true
+          
+          # Wait for pods to stabilize
+          echo "Waiting for pods to stabilize..."
+          sleep 30
           
           # Check ArgoCD server status
           echo "Current ArgoCD server pods:"
@@ -115,6 +136,9 @@ jobs:
           metadata:
             name: argocd-server-lb
             namespace: argocd
+            annotations:
+              service.beta.kubernetes.io/aws-load-balancer-backend-protocol: "http"
+              service.beta.kubernetes.io/aws-load-balancer-ssl-ports: "https"
           spec:
             ports:
             - name: http
