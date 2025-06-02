@@ -181,7 +181,7 @@ function Dashboard() {
                 Recent Activity
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                No recent activities to display. No activities yet.
+                No recent activities to display.
               </Typography>
             </CardContent>
           </Card>
