@@ -33,6 +33,14 @@ This project implements a microservices architecture with the following componen
 - kubectl installed
 - Terraform installed
 - Docker installed
+- If you want to clone and deploy the application to your account, then create a repository secret with AWS_ROLE_ARN key and a OIDC role to github.
+
+### Connect to ArgoCD UI
+To connect to argoCD UI, run below commands to port forward.
+- aws eks update-kubeconfig --region us-west-2 --name pet-hospital-eks-cluster --role-arn arn:aws:iam::<AWS_ACCOUNT>:role/github-actions-role
+- kubectl port-forward svc/argocd-server -n argocd 8080:80
+- Username is admin
+- To get password run: kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
 
 ### Deployment
 
