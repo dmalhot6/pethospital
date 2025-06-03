@@ -102,6 +102,19 @@ resource "aws_iam_role_policy_attachment" "node_AmazonEC2ContainerRegistryReadOn
   role       = aws_iam_role.node.name
 }
 
+# Add DynamoDB access policy for EKS nodes
+resource "aws_iam_policy" "node_dynamodb_access" {
+  name        = "${var.cluster_name}-node-dynamodb-access"
+  description = "IAM policy for EKS nodes to access DynamoDB tables"
+
+  policy = file("${path.module}/policies/dynamodb-policy.json")
+}
+
+resource "aws_iam_role_policy_attachment" "node_dynamodb_access" {
+  policy_arn = aws_iam_policy.node_dynamodb_access.arn
+  role       = aws_iam_role.node.name
+}
+
 # Create IAM OIDC provider for the cluster
 data "tls_certificate" "eks" {
   url = aws_eks_cluster.this.identity[0].oidc[0].issuer
