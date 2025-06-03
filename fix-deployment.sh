@@ -148,7 +148,7 @@ EOF
 echo "Fixing Kubernetes manifests..."
 
 # Get AWS account ID
-AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text || echo "622037664315")
+AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text || echo "304930966996")
 AWS_REGION="us-west-2"
 PROJECT_PREFIX="pet-hospital"
 
