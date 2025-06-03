@@ -30,7 +30,7 @@ spec:
     spec:
       containers:
         - name: pet-service
-          image: 304930966996.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-pet-service:7ac445ba3f1a5488b25f0b0766ebd8dc59090d45
+          image: 304930966996.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-pet-service:57d5d403fa274b9aea1e841bc428f132c67fc464
           ports:
             - containerPort: 3000
           resources:
