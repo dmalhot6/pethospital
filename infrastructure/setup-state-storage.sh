@@ -30,13 +30,13 @@ echo "Setting up Terraform state storage with prefix: ${PREFIX} in region: ${REG
 
 # Create S3 bucket for Terraform state
 aws s3api create-bucket \
-  --bucket ${PREFIX}-terraform-state \
+  --bucket ${PREFIX}-terraform-state-${REGION} \
   --region ${REGION} \
   --create-bucket-configuration LocationConstraint=${REGION}
 
 # Enable versioning on the S3 bucket
 aws s3api put-bucket-versioning \
-  --bucket ${PREFIX}-terraform-state \
+  --bucket ${PREFIX}-terraform-state-${REGION} \
   --versioning-configuration Status=Enabled
 
 # Create DynamoDB table for state locking
@@ -50,6 +50,6 @@ aws dynamodb create-table \
 echo "Terraform state storage has been set up successfully."
 echo ""
 echo "Important: Update backend.tf with these values if they differ from defaults:"
-echo "  bucket         = \"${PREFIX}-terraform-state\""
+echo "  bucket         = \"${PREFIX}-terraform-state-${REGION}\""
 echo "  region         = \"${REGION}\""
 echo "  dynamodb_table = \"${PREFIX}-terraform-locks\""

@@ -44,7 +44,7 @@ jobs:
             cat > ./infrastructure/backend.tf << EOF
           terraform {
             backend "s3" {
-              bucket         = "${{ github.event.inputs.prefix }}-terraform-state"
+              bucket         = "${{ github.event.inputs.prefix }}-terraform-state-${{ github.event.inputs.region }}"
               key            = "terraform.tfstate"
               region         = "${{ github.event.inputs.region }}"
               dynamodb_table = "${{ github.event.inputs.prefix }}-terraform-locks"
@@ -69,7 +69,7 @@ jobs:
       - name: Verify Setup
         run: |
           echo "Terraform state storage has been set up successfully."
-          echo "S3 Bucket: ${{ github.event.inputs.prefix }}-terraform-state"
+          echo "S3 Bucket: ${{ github.event.inputs.prefix }}-terraform-state-${{ github.event.inputs.region }}"
           echo "DynamoDB Table: ${{ github.event.inputs.prefix }}-terraform-locks"
           echo "Region: ${{ github.event.inputs.region }}"
           echo ""

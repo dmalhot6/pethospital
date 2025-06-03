@@ -92,10 +92,10 @@ jobs:
           echo "Cleaning up Terraform state storage..."
           
           # Empty S3 bucket first
-          aws s3 rm s3://${{ env.PROJECT_PREFIX }}-terraform-state --recursive
+          aws s3 rm s3://${{ env.PROJECT_PREFIX }}-terraform-state-${{ env.AWS_REGION }} --recursive
           
           # Delete S3 bucket
-          aws s3api delete-bucket --bucket ${{ env.PROJECT_PREFIX }}-terraform-state --region ${{ env.AWS_REGION }}
+          aws s3api delete-bucket --bucket ${{ env.PROJECT_PREFIX }}-terraform-state-${{ env.AWS_REGION }} --region ${{ env.AWS_REGION }}
           
           # Delete DynamoDB table
           aws dynamodb delete-table --table-name ${{ env.PROJECT_PREFIX }}-terraform-locks --region ${{ env.AWS_REGION }}
