@@ -12,6 +12,8 @@ spec:
               value: "dev"
             - name: AWS_REGION
               value: "us-west-2"
+            - name: DYNAMODB_TABLE
+              value: "pet-hospital-pets"
           image: 304930966996.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-pet-service:ea5b5b156b686c0548b8662345cc6de25cc4b8f0
 ---
 apiVersion: apps/v1
@@ -28,6 +30,8 @@ spec:
               value: "dev"
             - name: AWS_REGION
               value: "us-west-2"
+            - name: DYNAMODB_TABLE
+              value: "pet-hospital-hospitals"
           image: 304930966996.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-hospital-service:ea5b5b156b686c0548b8662345cc6de25cc4b8f0
 ---
 apiVersion: apps/v1
@@ -44,6 +48,8 @@ spec:
               value: "dev"
             - name: AWS_REGION
               value: "us-west-2"
+            - name: DYNAMODB_TABLE
+              value: "pet-hospital-doctors"
           image: 304930966996.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-doctor-service:ea5b5b156b686c0548b8662345cc6de25cc4b8f0
 ---
 apiVersion: apps/v1

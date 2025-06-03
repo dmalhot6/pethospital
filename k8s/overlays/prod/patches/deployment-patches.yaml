@@ -10,6 +10,10 @@ spec:
           env:
             - name: ENVIRONMENT
               value: "prod"
+            - name: AWS_REGION
+              value: "us-west-2"
+            - name: DYNAMODB_TABLE
+              value: "pet-hospital-pets"
           resources:
             limits:
               cpu: "1000m"
@@ -30,6 +34,10 @@ spec:
           env:
             - name: ENVIRONMENT
               value: "prod"
+            - name: AWS_REGION
+              value: "us-west-2"
+            - name: DYNAMODB_TABLE
+              value: "pet-hospital-hospitals"
           resources:
             limits:
               cpu: "1000m"
@@ -50,6 +58,10 @@ spec:
           env:
             - name: ENVIRONMENT
               value: "prod"
+            - name: AWS_REGION
+              value: "us-west-2"
+            - name: DYNAMODB_TABLE
+              value: "pet-hospital-doctors"
           resources:
             limits:
               cpu: "1000m"
