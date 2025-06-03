@@ -119,5 +119,5 @@ variable "ok_actions" {
 variable "git_repository_url" {
   description = "URL of the Git repository containing the application code"
   type        = string
-  default     = "https://github.com/AnandarajuCS/pethospital.git"
+  default     = "https://github.com/CloudSmith-Agent-Beta/pethospital.git"
 }
