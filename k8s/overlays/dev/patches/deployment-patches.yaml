@@ -12,9 +12,7 @@ spec:
               value: "dev"
             - name: AWS_REGION
               value: "us-west-2"
-            - name: DYNAMODB_TABLE
-              value: "pet-hospital-pets"
-          image: 304930966996.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-pet-service:ea5b5b156b686c0548b8662345cc6de25cc4b8f0
+          image: 304930966996.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-pet-service:13867d43a5f56b01a7b3ef5d77cb60c43669510f
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -30,9 +28,7 @@ spec:
               value: "dev"
             - name: AWS_REGION
               value: "us-west-2"
-            - name: DYNAMODB_TABLE
-              value: "pet-hospital-hospitals"
-          image: 304930966996.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-hospital-service:ea5b5b156b686c0548b8662345cc6de25cc4b8f0
+          image: 304930966996.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-hospital-service:13867d43a5f56b01a7b3ef5d77cb60c43669510f
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -48,9 +44,7 @@ spec:
               value: "dev"
             - name: AWS_REGION
               value: "us-west-2"
-            - name: DYNAMODB_TABLE
-              value: "pet-hospital-doctors"
-          image: 304930966996.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-doctor-service:ea5b5b156b686c0548b8662345cc6de25cc4b8f0
+          image: 304930966996.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-doctor-service:13867d43a5f56b01a7b3ef5d77cb60c43669510f
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -66,4 +60,4 @@ spec:
               value: "dev"
             - name: API_URL
               value: "http://frontend-ingress"
-          image: 304930966996.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-frontend:ea5b5b156b686c0548b8662345cc6de25cc4b8f0
+          image: 304930966996.dkr.ecr.us-west-2.amazonaws.com/pet-hospital-frontend:13867d43a5f56b01a7b3ef5d77cb60c43669510f
