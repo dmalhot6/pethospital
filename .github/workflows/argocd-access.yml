@@ -28,7 +28,10 @@ jobs:
 
       - name: Add user to aws-auth ConfigMap
         run: |
-          kubectl patch configmap aws-auth -n kube-system --type=merge -p '{"data":{"mapRoles":"- rolearn: arn:aws:sts::622037664315:assumed-role/admin/anandsjo-Isengard\n  username: admin\n  groups:\n    - system:masters\n"}}'
+          # Get AWS account ID dynamically
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          
+          kubectl patch configmap aws-auth -n kube-system --type=merge -p '{"data":{"mapRoles":"- rolearn: arn:aws:sts::'"${AWS_ACCOUNT_ID}"':assumed-role/admin/anandsjo-Isengard\n  username: admin\n  groups:\n    - system:masters\n"}}'
 
       - name: Fix ArgoCD configuration
         run: |
