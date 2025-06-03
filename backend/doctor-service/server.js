@@ -43,7 +43,7 @@ app.use((req, res, next) => {
 const dynamoDB = new AWS.DynamoDB.DocumentClient({
   region: process.env.AWS_REGION || 'us-west-2',
 });
-const tableName = process.env.DYNAMODB_TABLE || 'Doctors';
+const tableName = process.env.DYNAMODB_TABLE || 'pet-hospital-doctors';
 
 // Routes
 app.get('/health', (req, res) => {
