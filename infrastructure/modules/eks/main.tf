@@ -9,6 +9,9 @@ resource "aws_eks_cluster" "this" {
     endpoint_public_access  = true
   }
 
+  # Enable CloudWatch logging for EKS control plane
+  enabled_cluster_log_types = ["api", "audit", "authenticator", "controllerManager", "scheduler"]
+
   depends_on = [
     aws_iam_role_policy_attachment.cluster_AmazonEKSClusterPolicy,
     aws_iam_role_policy_attachment.cluster_AmazonEKSVPCResourceController,
@@ -65,6 +68,7 @@ resource "aws_eks_node_group" "this" {
     aws_iam_role_policy_attachment.node_AmazonEKSWorkerNodePolicy,
     aws_iam_role_policy_attachment.node_AmazonEKS_CNI_Policy,
     aws_iam_role_policy_attachment.node_AmazonEC2ContainerRegistryReadOnly,
+    aws_iam_role_policy_attachment.node_cloudwatch_access,
   ]
 
   tags = var.tags
@@ -115,6 +119,19 @@ resource "aws_iam_role_policy_attachment" "node_dynamodb_access" {
   role       = aws_iam_role.node.name
 }
 
+# Add CloudWatch access policy for EKS nodes
+resource "aws_iam_policy" "node_cloudwatch_access" {
+  name        = "${var.cluster_name}-node-cloudwatch-access"
+  description = "IAM policy for EKS nodes to publish metrics to CloudWatch"
+
+  policy = file("${path.module}/policies/cloudwatch-policy.json")
+}
+
+resource "aws_iam_role_policy_attachment" "node_cloudwatch_access" {
+  policy_arn = aws_iam_policy.node_cloudwatch_access.arn
+  role       = aws_iam_role.node.name
+}
+
 # Create IAM OIDC provider for the cluster
 data "tls_certificate" "eks" {
   url = aws_eks_cluster.this.identity[0].oidc[0].issuer
@@ -162,9 +179,35 @@ resource "aws_iam_role_policy_attachment" "aws_load_balancer_controller" {
   role       = aws_iam_role.aws_load_balancer_controller.name
 }
 
+# Install CloudWatch Container Insights
+resource "null_resource" "install_container_insights" {
+  depends_on = [aws_eks_cluster.this, aws_eks_node_group.this]
+
+  provisioner "local-exec" {
+    command = <<-EOT
+      aws eks update-kubeconfig --name ${var.cluster_name} --region ${var.region}
+      
+      # Install CloudWatch Container Insights
+      ClusterName=${var.cluster_name}
+      RegionName=${var.region}
+      FluentBitHttpPort='2020'
+      FluentBitReadFromHead='Off'
+      [[ ${var.region} = "cn-north-1" || ${var.region} = "cn-northwest-1" ]] && FluentBitHttpServer='cn.flb.amazonaws.com' || FluentBitHttpServer='flb.amazonaws.com'
+      
+      # Create namespace if it doesn't exist
+      kubectl create namespace amazon-cloudwatch --dry-run=client -o yaml | kubectl apply -f -
+      
+      # Apply CloudWatch agent configuration
+      curl https://raw.githubusercontent.com/aws-samples/amazon-cloudwatch-container-insights/latest/k8s-deployment-manifest-templates/deployment-mode/daemonset/container-insights-monitoring/quickstart/cwagent-fluentd-quickstart.yaml | \
+      sed "s/{{cluster_name}}/$ClusterName/;s/{{region_name}}/$RegionName/;s/{{http_server_toggle}}/$FluentBitHttpServer/;s/{{http_server_port}}/$FluentBitHttpPort/;s/{{read_from_head}}/$FluentBitReadFromHead/" | \
+      kubectl apply -f -
+    EOT
+  }
+}
+
 # Create AWS Load Balancer Controller
 resource "null_resource" "install_aws_load_balancer_controller" {
-  depends_on = [aws_eks_cluster.this, aws_eks_node_group.this]
+  depends_on = [aws_eks_cluster.this, aws_eks_node_group.this, null_resource.install_container_insights]
 
   provisioner "local-exec" {
     command = <<-EOT
