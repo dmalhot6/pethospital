@@ -44,7 +44,7 @@ resource "aws_cloudwatch_dashboard" "this" {
         height = 6
         properties = {
           metrics = [
-            ["AWS/EKS", "cluster_failed_node_count", "ClusterName", var.cluster_name]
+            ["ContainerInsights", "node_failed_count", "ClusterName", var.cluster_name]
           ]
           period = 300
           stat   = "Maximum"
@@ -60,13 +60,45 @@ resource "aws_cloudwatch_dashboard" "this" {
         height = 6
         properties = {
           metrics = [
-            ["AWS/EKS", "pod_cpu_utilization", "ClusterName", var.cluster_name],
-            ["AWS/EKS", "pod_memory_utilization", "ClusterName", var.cluster_name]
+            ["ContainerInsights", "pod_cpu_utilization", "ClusterName", var.cluster_name],
+            ["ContainerInsights", "pod_memory_utilization", "ClusterName", var.cluster_name]
           ]
           period = 300
           stat   = "Average"
           region = data.aws_region.current.name
           title  = "Pod Resource Utilization"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 0
+        y      = 12
+        width  = 12
+        height = 6
+        properties = {
+          metrics = [
+            ["ContainerInsights", "node_cpu_utilization", "ClusterName", var.cluster_name]
+          ]
+          period = 300
+          stat   = "Average"
+          region = data.aws_region.current.name
+          title  = "Node CPU Utilization"
+        }
+      },
+      {
+        type   = "metric"
+        x      = 12
+        y      = 12
+        width  = 12
+        height = 6
+        properties = {
+          metrics = [
+            ["ContainerInsights", "node_memory_utilization", "ClusterName", var.cluster_name]
+          ]
+          period = 300
+          stat   = "Average"
+          region = data.aws_region.current.name
+          title  = "Node Memory Utilization"
         }
       }
     ]
@@ -115,17 +147,19 @@ resource "aws_cloudwatch_metric_alarm" "error_rate" {
   tags = var.tags
 }
 
-# CPU Utilization Alarm
-resource "aws_cloudwatch_metric_alarm" "cpu_utilization" {
-  alarm_name          = "${var.cluster_name}-cpu-utilization"
+# Get current AWS region
+data "aws_region" "current" {}
+# Container Insights - Pod CPU Utilization Alarm
+resource "aws_cloudwatch_metric_alarm" "container_insights_pod_cpu" {
+  alarm_name          = "${var.cluster_name}-pod-cpu-utilization"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   metric_name         = "pod_cpu_utilization"
-  namespace           = "AWS/EKS"
+  namespace           = "ContainerInsights"
   period              = 300
   statistic           = "Average"
   threshold           = var.cpu_utilization_threshold
-  alarm_description   = "This metric monitors pod CPU utilization"
+  alarm_description   = "This metric monitors pod CPU utilization using Container Insights"
   alarm_actions       = var.alarm_actions
   ok_actions          = var.ok_actions
   
@@ -136,17 +170,101 @@ resource "aws_cloudwatch_metric_alarm" "cpu_utilization" {
   tags = var.tags
 }
 
-# Memory Utilization Alarm
-resource "aws_cloudwatch_metric_alarm" "memory_utilization" {
-  alarm_name          = "${var.cluster_name}-memory-utilization"
+# Container Insights - Pod Memory Utilization Alarm
+resource "aws_cloudwatch_metric_alarm" "container_insights_pod_memory" {
+  alarm_name          = "${var.cluster_name}-pod-memory-utilization"
   comparison_operator = "GreaterThanThreshold"
   evaluation_periods  = 2
   metric_name         = "pod_memory_utilization"
-  namespace           = "AWS/EKS"
+  namespace           = "ContainerInsights"
   period              = 300
   statistic           = "Average"
   threshold           = var.memory_utilization_threshold
-  alarm_description   = "This metric monitors pod memory utilization"
+  alarm_description   = "This metric monitors pod memory utilization using Container Insights"
+  alarm_actions       = var.alarm_actions
+  ok_actions          = var.ok_actions
+  
+  dimensions = {
+    ClusterName = var.cluster_name
+  }
+  
+  tags = var.tags
+}
+
+# Container Insights - Node CPU Utilization Alarm
+resource "aws_cloudwatch_metric_alarm" "container_insights_node_cpu" {
+  alarm_name          = "${var.cluster_name}-node-cpu-utilization"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "node_cpu_utilization"
+  namespace           = "ContainerInsights"
+  period              = 300
+  statistic           = "Average"
+  threshold           = var.cpu_utilization_threshold
+  alarm_description   = "This metric monitors node CPU utilization using Container Insights"
+  alarm_actions       = var.alarm_actions
+  ok_actions          = var.ok_actions
+  
+  dimensions = {
+    ClusterName = var.cluster_name
+  }
+  
+  tags = var.tags
+}
+
+# Container Insights - Node Memory Utilization Alarm
+resource "aws_cloudwatch_metric_alarm" "container_insights_node_memory" {
+  alarm_name          = "${var.cluster_name}-node-memory-utilization"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "node_memory_utilization"
+  namespace           = "ContainerInsights"
+  period              = 300
+  statistic           = "Average"
+  threshold           = var.memory_utilization_threshold
+  alarm_description   = "This metric monitors node memory utilization using Container Insights"
+  alarm_actions       = var.alarm_actions
+  ok_actions          = var.ok_actions
+  
+  dimensions = {
+    ClusterName = var.cluster_name
+  }
+  
+  tags = var.tags
+}
+
+# Container Insights - Node Disk Utilization Alarm
+resource "aws_cloudwatch_metric_alarm" "container_insights_node_disk" {
+  alarm_name          = "${var.cluster_name}-node-disk-utilization"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "node_filesystem_utilization"
+  namespace           = "ContainerInsights"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 80 # 80% disk utilization threshold
+  alarm_description   = "This metric monitors node disk utilization using Container Insights"
+  alarm_actions       = var.alarm_actions
+  ok_actions          = var.ok_actions
+  
+  dimensions = {
+    ClusterName = var.cluster_name
+  }
+  
+  tags = var.tags
+}
+
+# Container Insights - Node Network Utilization Alarm
+resource "aws_cloudwatch_metric_alarm" "container_insights_node_network" {
+  alarm_name          = "${var.cluster_name}-node-network-utilization"
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 2
+  metric_name         = "node_network_total_bytes"
+  namespace           = "ContainerInsights"
+  period              = 300
+  statistic           = "Average"
+  threshold           = 1000000000 # 1GB network traffic threshold
+  alarm_description   = "This metric monitors node network utilization using Container Insights"
   alarm_actions       = var.alarm_actions
   ok_actions          = var.ok_actions
   
