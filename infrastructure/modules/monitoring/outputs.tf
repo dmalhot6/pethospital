@@ -13,7 +13,11 @@ output "alarm_arns" {
   value = [
     aws_cloudwatch_metric_alarm.api_latency.arn,
     aws_cloudwatch_metric_alarm.error_rate.arn,
-    aws_cloudwatch_metric_alarm.cpu_utilization.arn,
-    aws_cloudwatch_metric_alarm.memory_utilization.arn
+    aws_cloudwatch_metric_alarm.container_insights_pod_cpu.arn,
+    aws_cloudwatch_metric_alarm.container_insights_pod_memory.arn,
+    aws_cloudwatch_metric_alarm.container_insights_node_cpu.arn,
+    aws_cloudwatch_metric_alarm.container_insights_node_memory.arn,
+    aws_cloudwatch_metric_alarm.container_insights_node_disk.arn,
+    aws_cloudwatch_metric_alarm.container_insights_node_network.arn
   ]
 }
