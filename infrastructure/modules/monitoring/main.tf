@@ -149,6 +149,7 @@ resource "aws_cloudwatch_metric_alarm" "error_rate" {
 
 # Get current AWS region
 data "aws_region" "current" {}
+
 # Container Insights - Pod CPU Utilization Alarm
 resource "aws_cloudwatch_metric_alarm" "container_insights_pod_cpu" {
   alarm_name          = "${var.cluster_name}-pod-cpu-utilization"
@@ -274,6 +275,3 @@ resource "aws_cloudwatch_metric_alarm" "container_insights_node_network" {
   
   tags = var.tags
 }
-
-# Get current AWS region
-data "aws_region" "current" {}
