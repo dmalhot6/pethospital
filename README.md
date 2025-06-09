@@ -1,6 +1,6 @@
 # Pet Hospital Management System
 
-A comprehensive pet hospital management system built with microservices architecture running on Amazon EKS.
+A comprehensive pet hospital management system built with microservices architecture running on Amazon EKS. 
 
 ## Architecture
 
