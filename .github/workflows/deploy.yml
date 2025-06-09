@@ -11,6 +11,10 @@ on:
         options:
           - dev
           - prod
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches:
+      - main
 
 env:
   AWS_REGION: us-west-2
