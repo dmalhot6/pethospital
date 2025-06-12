@@ -33,6 +33,14 @@ jobs:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ github.event.inputs.region }}
 
+      - name: Debug - Check AWS Caller Identity
+        run: |
+          echo "Checking AWS Caller Identity..."
+          aws sts get-caller-identity
+          echo "AWS Account ID: $(aws sts get-caller-identity --query 'Account' --output text)"
+          echo "AWS User ARN: $(aws sts get-caller-identity --query 'Arn' --output text)"
+          echo "AWS User ID: $(aws sts get-caller-identity --query 'UserId' --output text)"
+
       - name: Setup Terraform State Storage
         run: |
           chmod +x ./infrastructure/setup-state-storage.sh
