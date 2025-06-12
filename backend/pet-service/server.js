@@ -76,7 +76,7 @@ app.get('/pets/:id', async (req, res) => {
       },
     };
     
-    const result = await dynamoDB.get(params).promise();
+    const result = await dynamoDB.scan(params).promise();
     
     if (!result.Item) {
       return res.status(404).json({ error: 'Pet not found' });
